@@ -1,0 +1,13 @@
+{
+  "name": "@shellter/balance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sim": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@shellter/shared": "workspace:*" },
+  "devDependencies": { "@types/node": "^24.0.0", "tsx": "^4.0.0", "typescript": "~5.9.3", "vitest": "^4.0.0" }
+}
