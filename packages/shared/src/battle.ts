@@ -444,7 +444,7 @@ export function ratePower(f: Fighter): number {
   const dps = dealt / res.duration;
 
   const brute: Fighter = { ...DUMMY_BASE, id: 'brute', maxHp: 1e9, atk: 14, interval: 1, armor: 0 };
-  const tank = simulateBattle({ ...f, atk: 0, abilities: f.abilities.filter((ab) => ab.kind === 'shield' || ab.kind === 'heal') }, brute, 'power-rating', { noEvents: true });
+  const tank = simulateBattle(f, brute, 'power-rating', { noEvents: true });
   let taken = 0;
   for (const k of Object.keys(tank.damage[1])) taken += tank.damage[1][k] as number;
   // Survived the whole fight: extrapolate from the HP that is left.

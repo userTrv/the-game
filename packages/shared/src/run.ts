@@ -7,7 +7,7 @@ import { heroDef } from './data/heroes';
 import { mutationDef } from './data/mutations';
 import { MAX_SHELL_TIER } from './data/shells';
 import { tenantDef } from './data/tenants';
-import { generateOffers, generateShellChoices, generateShop, type Offer, type ShopItem } from './offers';
+import { generateOffers, generateShellChoices, generateShop, registerMaxHp, type Offer, type ShopItem } from './offers';
 import { createRng, subSeed } from './rng';
 import { CHAPTER_STAGES, creatureTier, spawnTable, stageInfo } from './stages';
 import {
@@ -194,6 +194,8 @@ export function maxHpOf(state: RunState): number {
 export function lootMult(state: RunState, stage: number, mods: Mods): number {
   return (1 + BAL.lootDepthK * (stage - 1)) * (1 + (mods.lootPct + (state.cfg.event?.lootPct ?? 0)) / 100);
 }
+
+registerMaxHp(maxHpOf);
 
 function emptyStats(): RunStats {
   return {
@@ -576,7 +578,7 @@ export function applyRunAction(
   action: RunAction,
   ctx: RunContext = {},
 ): { state: RunState; events: RunEvent[] } {
-  const state = structuredClone(prev);
+  const state = JSON.parse(JSON.stringify(prev)) as RunState;
   const events: RunEvent[] = [];
   const camp = (): CampState => {
     if (state.phase !== 'camp' || !state.camp) fail('bad_phase', 'not at a camp');
@@ -607,15 +609,12 @@ export function applyRunAction(
       const choice = c.shellChoices?.[action.index];
       if (!choice) fail('bad_index');
       const n = slotCount(state.cfg.heroId, choice, state.cfg.extraSlots);
-      const tenants = state.slots.filter((t): t is TenantInst => t !== null);
       state.shell = { ...choice };
-      state.slots = new Array<TenantInst | null>(Math.max(n, tenants.length)).fill(null);
-      // Keep relative positions where possible.
+      // Tenants move into the new home and keep their places.
+      state.slots = new Array<TenantInst | null>(Math.max(n, prev.slots.length)).fill(null);
       prev.slots.forEach((t, i) => {
-        if (t && i < state.slots.length) state.slots[i] = { ...t };
+        if (t) state.slots[i] = { ...t };
       });
-      const placed = new Set(state.slots.filter(Boolean).map((t) => t));
-      void placed;
       c.shellChoices = null;
       events.push({ type: 'shell', shell: state.shell });
       clampHp(state);
@@ -789,8 +788,7 @@ export function applyRunAction(
     }
 
     case 'carry_out': {
-      const c = campFree();
-      void c;
+      campFree();
       finish(state, 'carried', events);
       break;
     }
