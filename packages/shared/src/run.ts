@@ -84,6 +84,10 @@ export interface RunStats {
   rerolls: number;
   huntSeconds: number;
   maxStage: number;
+  /** Almanac discoveries: tenant id -> highest star held, shells worn, guardians beaten. */
+  seenTenants: Record<string, number>;
+  seenShells: string[];
+  guardiansBeaten: string[];
 }
 
 export type RunPhase = 'hunt' | 'camp' | 'battle' | 'down' | 'ended';
@@ -213,6 +217,9 @@ function emptyStats(): RunStats {
     rerolls: 0,
     huntSeconds: 0,
     maxStage: 1,
+    seenTenants: {},
+    seenShells: [],
+    guardiansBeaten: [],
   };
 }
 
@@ -250,6 +257,7 @@ export function startRun(id: string, seed: string, cfg: RunConfig): RunState {
     huntNonce: 1,
   };
   state.hp = maxHpOf(state);
+  updateSetStats(state);
   return state;
 }
 
@@ -302,6 +310,9 @@ function resolveMerges(state: RunState, events: RunEvent[]): void {
 function updateSetStats(state: RunState): void {
   const counts = familyCounts(state.slots);
   for (const d of DIETS) state.stats.maxSet[d] = Math.max(state.stats.maxSet[d], counts[d]);
+  for (const t of state.slots) {
+    if (t) state.stats.seenTenants[t.id] = Math.max(state.stats.seenTenants[t.id] ?? 0, t.star);
+  }
 }
 
 /**
@@ -616,6 +627,7 @@ export function applyRunAction(
         if (t) state.slots[i] = { ...t };
       });
       c.shellChoices = null;
+      if (!state.stats.seenShells.includes(choice.id)) state.stats.seenShells.push(choice.id);
       events.push({ type: 'shell', shell: state.shell });
       clampHp(state);
       break;
@@ -740,6 +752,9 @@ export function applyRunAction(
         state.loot.shine += shine;
         state.stats.battlesWon += 1;
         if (isGhost) state.stats.ghostWins += 1;
+        else if (setup.enemy.kind === 'guardian' && !state.stats.guardiansBeaten.includes(setup.enemy.id)) {
+          state.stats.guardiansBeaten.push(setup.enemy.id);
+        }
         state.stats.maxStage = Math.max(state.stats.maxStage, setup.stage);
         events.push({ type: 'battle', result, won, enemy: setup.enemy, seed, rewards: { pearls, shine: Math.floor(shine), trophies: isGhost ? TROPHY_WIN : 0 } });
         if (setup.stage >= state.cfg.maxStage) {

@@ -1,0 +1,392 @@
+import type { Fighter } from './build';
+import type { Cost } from './data/town';
+import type { EventModifier } from './meta';
+import { createRng } from './rng';
+import type { RunState } from './run';
+import { DIETS, type Diet } from './types';
+
+// --- Quests ----------------------------------------------------------------------------------------
+
+export type QuestMetric =
+  | 'eat_total'
+  | `eat_${Diet}`
+  | 'merge2'
+  | 'merge3'
+  | 'set4'
+  | 'win_battle'
+  | 'reach_stage'
+  | 'carry_out'
+  | 'pearls'
+  | 'runs'
+  | 'ghost_win'
+  | 'upgrade'
+  | 'kraken_hit';
+
+export interface QuestDef {
+  id: string;
+  period: 'daily' | 'weekly';
+  metric: QuestMetric;
+  need: number;
+  reward: Cost & { passXp: number };
+  /** 'max' metrics keep the best value instead of summing. */
+  mode?: 'sum' | 'max';
+}
+
+const q = (id: string, period: 'daily' | 'weekly', metric: QuestMetric, need: number, coral: number, shine: number, passXp: number, mode: 'sum' | 'max' = 'sum'): QuestDef => ({
+  id, period, metric, need, reward: { coral, shine, passXp }, mode,
+});
+
+export const QUESTS: readonly QuestDef[] = [
+  q('d_eat_60', 'daily', 'eat_total', 60, 40, 0, 20),
+  ...DIETS.map((d) => q(`d_eat_${d}`, 'daily', `eat_${d}`, 25, 45, 1, 20)),
+  q('d_merge2', 'daily', 'merge2', 2, 50, 1, 25),
+  q('d_win', 'daily', 'win_battle', 1, 50, 1, 25),
+  q('d_carry', 'daily', 'carry_out', 1, 40, 1, 20),
+  q('d_pearls', 'daily', 'pearls', 25, 40, 0, 20),
+  q('d_runs', 'daily', 'runs', 2, 45, 1, 20),
+  q('d_upgrade', 'daily', 'upgrade', 1, 30, 1, 20),
+  q('w_eat_500', 'weekly', 'eat_total', 500, 250, 6, 100),
+  q('w_merge3', 'weekly', 'merge3', 1, 300, 8, 120),
+  q('w_set4', 'weekly', 'set4', 4, 250, 6, 100, 'max'),
+  q('w_stage9', 'weekly', 'reach_stage', 9, 300, 8, 120, 'max'),
+  q('w_wins', 'weekly', 'win_battle', 8, 280, 6, 100),
+  q('w_ghost', 'weekly', 'ghost_win', 3, 260, 8, 110),
+  q('w_kraken', 'weekly', 'kraken_hit', 5, 220, 6, 100),
+  q('w_runs', 'weekly', 'runs', 10, 240, 5, 100),
+];
+
+export const QUEST_BY_ID: ReadonlyMap<string, QuestDef> = new Map(QUESTS.map((x) => [x.id, x]));
+export const DAILY_QUESTS = 3;
+export const WEEKLY_QUESTS = 3;
+
+export interface QuestProgress {
+  id: string;
+  progress: number;
+  claimed: boolean;
+}
+
+export interface QuestState {
+  /** UTC day key YYYY-MM-DD. */
+  day: string;
+  daily: QuestProgress[];
+  /** ISO week key YYYY-Www. */
+  week: string;
+  weekly: QuestProgress[];
+}
+
+export function dayKey(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function weekKey(ms: number): string {
+  const d = new Date(ms);
+  const day = (d.getUTCDay() + 6) % 7; // Monday = 0
+  const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+  const firstThursday = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((thursday.getTime() - firstThursday.getTime()) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function rollQuests(period: 'daily' | 'weekly', count: number, seed: string): QuestProgress[] {
+  const pool = QUESTS.filter((x) => x.period === period);
+  return createRng(seed)
+    .shuffle(pool)
+    .slice(0, count)
+    .map((x) => ({ id: x.id, progress: 0, claimed: false }));
+}
+
+/** Rolls new daily/weekly quests when the period changed. Deterministic per player and period. */
+export function refreshQuests(state: QuestState | null, playerId: string, now: number): QuestState {
+  const day = dayKey(now);
+  const week = weekKey(now);
+  return {
+    day,
+    daily: state && state.day === day ? state.daily : rollQuests('daily', DAILY_QUESTS, `q/${playerId}/${day}`),
+    week,
+    weekly: state && state.week === week ? state.weekly : rollQuests('weekly', WEEKLY_QUESTS, `q/${playerId}/${week}`),
+  };
+}
+
+export type QuestDeltas = Partial<Record<QuestMetric, number>>;
+
+export function questDeltasForRun(run: RunState): QuestDeltas {
+  const d: QuestDeltas = {
+    eat_total: run.stats.eatenTotal,
+    merge2: run.stats.merges[0],
+    merge3: run.stats.merges[1],
+    win_battle: run.stats.battlesWon,
+    reach_stage: run.stats.maxStage,
+    carry_out: run.result === 'defeat' ? 0 : 1,
+    pearls: run.stats.pearlsEarned,
+    runs: 1,
+    ghost_win: run.stats.ghostWins,
+    set4: Math.max(...DIETS.map((x) => run.stats.maxSet[x])),
+  };
+  for (const diet of DIETS) d[`eat_${diet}`] = run.stats.eatenByDiet[diet];
+  return d;
+}
+
+export function applyQuestDeltas(state: QuestState, deltas: QuestDeltas): QuestState {
+  const bump = (list: QuestProgress[]): QuestProgress[] =>
+    list.map((p) => {
+      const def = QUEST_BY_ID.get(p.id);
+      const delta = def ? deltas[def.metric] : undefined;
+      if (!def || !delta || p.claimed) return p;
+      const progress = def.mode === 'max' ? Math.max(p.progress, delta) : p.progress + delta;
+      return { ...p, progress: Math.min(def.need, progress) };
+    });
+  return { ...state, daily: bump(state.daily), weekly: bump(state.weekly) };
+}
+
+// --- Weekly event ------------------------------------------------------------------------------------
+
+export interface LocalText {
+  ru: string;
+  en: string;
+}
+
+export interface LiveEventConfig {
+  id: string;
+  title: LocalText;
+  description: LocalText;
+  /** Unix ms. */
+  startsAt: number;
+  endsAt: number;
+  modifier: Omit<EventModifier, 'id'>;
+  /** Diet whose eaten creatures score points; all creatures score when absent. */
+  featuredDiet?: Diet;
+  /** Leaderboard rewards by rank (inclusive upper bound). */
+  rankRewards: { upTo: number; reward: Cost; cosmetic?: string }[];
+}
+
+export function eventModifier(ev: LiveEventConfig): EventModifier {
+  return { id: ev.id, ...ev.modifier };
+}
+
+export function eventScore(run: RunState, ev: LiveEventConfig): number {
+  const eaten = ev.featuredDiet ? run.stats.eatenByDiet[ev.featuredDiet] : run.stats.eatenTotal;
+  return eaten + 15 * run.stats.maxStage + 40 * run.stats.battlesWon;
+}
+
+export const DEFAULT_EVENTS: readonly Omit<LiveEventConfig, 'startsAt' | 'endsAt'>[] = [
+  {
+    id: 'jelly_bloom',
+    title: { ru: 'Нерест медуз', en: 'Jellyfish bloom' },
+    description: { ru: 'Жгучих существ вдвое больше. Очки события дают съеденные жгучие.', en: 'Twice as many stinging creatures. Stinging prey scores event points.' },
+    modifier: { dietWeights: { sting: 2 } },
+    featuredDiet: 'sting',
+    rankRewards: [
+      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_jelly_king' },
+      { upTo: 10, reward: { coral: 900, shine: 35 } },
+      { upTo: 100, reward: { coral: 450, shine: 15 } },
+      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+    ],
+  },
+  {
+    id: 'pearl_tide',
+    title: { ru: 'Жемчужный прилив', en: 'Pearl tide' },
+    description: { ru: 'Жемчужницы щедрее на треть, панцирных существ больше.', en: 'Oysters give a third more pearls, more armored creatures.' },
+    modifier: { dietWeights: { armor: 1.6 }, pearlPct: 35 },
+    featuredDiet: 'armor',
+    rankRewards: [
+      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_pearl_baron' },
+      { upTo: 10, reward: { coral: 900, shine: 35 } },
+      { upTo: 100, reward: { coral: 450, shine: 15 } },
+      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+    ],
+  },
+  {
+    id: 'glow_night',
+    title: { ru: 'Ночь светлячков', en: 'Night of lights' },
+    description: { ru: 'Светящихся существ вдвое больше, добыча ценнее.', en: 'Twice as many glowing creatures, loot is worth more.' },
+    modifier: { dietWeights: { glow: 2 }, lootPct: 15 },
+    featuredDiet: 'glow',
+    rankRewards: [
+      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_lamplighter' },
+      { upTo: 10, reward: { coral: 900, shine: 35 } },
+      { upTo: 100, reward: { coral: 450, shine: 15 } },
+      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+    ],
+  },
+];
+
+// --- Kraken (community boss) ---------------------------------------------------------------------------
+
+export interface KrakenConfig {
+  id: string;
+  hpMax: number;
+  startsAt: number;
+  endsAt: number;
+  /** Rewards for everyone who hit the Kraken once the community passes a damage share. */
+  thresholds: { pct: number; reward: Cost }[];
+}
+
+export const KRAKEN_ATTACKS_PER_DAY = 3;
+export const KRAKEN_DEFAULT_THRESHOLDS: KrakenConfig['thresholds'] = [
+  { pct: 25, reward: { coral: 150, shine: 4 } },
+  { pct: 50, reward: { coral: 300, shine: 8 } },
+  { pct: 75, reward: { coral: 500, shine: 14 } },
+  { pct: 100, reward: { coral: 900, shine: 30 } },
+];
+
+/** The Kraken never dies inside one fight: the damage dealt in the fight is the contribution. */
+export function krakenFighter(): Fighter {
+  return {
+    id: 'kraken',
+    isGuardian: true,
+    maxHp: 1e9,
+    atk: 18,
+    interval: 1.1,
+    armor: 25,
+    crit: 0.1,
+    critMult: 2,
+    dodge: 0,
+    thorns: 0,
+    reflect: 0,
+    regen: 0,
+    leech: 0,
+    zapOnHit: 0,
+    poisonOnHit: 0,
+    poisonThorns: 0,
+    shieldOnHit: 0,
+    blindOnCrit: 0,
+    startShield: 0,
+    shieldMult: 1,
+    healMult: 1,
+    poisonNoDecay: false,
+    poisonWeaken: 0,
+    weakAura: 0,
+    revive: 0,
+    chainBonus: 0,
+    stormEvery: 0,
+    abilities: [
+      { src: 0, kind: 'blind', cd: 9, v: 2, dur: 0, n: 0, family: 'glow', first: 3, range: 0 },
+      { src: 1, kind: 'zap', cd: 5, v: 30, dur: 0, n: 0, family: 'sting', first: 4, range: 0 },
+      { src: 2, kind: 'poison', cd: 6, v: 6, dur: 0, n: 0, family: 'venom', first: 6, range: 0 },
+    ],
+  };
+}
+
+// --- Leagues ---------------------------------------------------------------------------------------------
+
+export const LEAGUES = [
+  { id: 'bronze', min: 0 },
+  { id: 'silver', min: 200 },
+  { id: 'gold', min: 500 },
+  { id: 'platinum', min: 900 },
+  { id: 'diamond', min: 1400 },
+  { id: 'legend', min: 2000 },
+] as const;
+export type LeagueId = (typeof LEAGUES)[number]['id'];
+
+export function leagueOf(trophies: number): LeagueId {
+  let id: LeagueId = 'bronze';
+  for (const l of LEAGUES) if (trophies >= l.min) id = l.id;
+  return id;
+}
+
+/** Soft reset at the end of a season. */
+export function seasonResetTrophies(trophies: number): number {
+  return Math.floor(trophies * 0.5);
+}
+
+// --- Shop (Telegram Stars) and cosmetics -------------------------------------------------------------------
+
+export type CosmeticKind = 'crab' | 'shell' | 'merge' | 'town' | 'title';
+
+export interface CosmeticDef {
+  id: string;
+  kind: CosmeticKind;
+  source: 'shop' | 'pass' | 'league' | 'event' | 'free';
+}
+
+export const COSMETICS: readonly CosmeticDef[] = [
+  { id: 'crab_default', kind: 'crab', source: 'free' },
+  { id: 'crab_azure', kind: 'crab', source: 'shop' },
+  { id: 'crab_coral', kind: 'crab', source: 'shop' },
+  { id: 'crab_gold', kind: 'crab', source: 'pass' },
+  { id: 'crab_abyss', kind: 'crab', source: 'league' },
+  { id: 'shell_default', kind: 'shell', source: 'free' },
+  { id: 'shell_candy', kind: 'shell', source: 'shop' },
+  { id: 'shell_galaxy', kind: 'shell', source: 'shop' },
+  { id: 'shell_pearl', kind: 'shell', source: 'pass' },
+  { id: 'merge_default', kind: 'merge', source: 'free' },
+  { id: 'merge_rainbow', kind: 'merge', source: 'shop' },
+  { id: 'merge_bubbles', kind: 'merge', source: 'pass' },
+  { id: 'town_default', kind: 'town', source: 'free' },
+  { id: 'town_lanterns', kind: 'town', source: 'shop' },
+  { id: 'title_jelly_king', kind: 'title', source: 'event' },
+  { id: 'title_pearl_baron', kind: 'title', source: 'event' },
+  { id: 'title_lamplighter', kind: 'title', source: 'event' },
+  { id: 'title_gold_claw', kind: 'title', source: 'league' },
+  { id: 'title_reef_legend', kind: 'title', source: 'league' },
+];
+export const COSMETIC_BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETICS.map((x) => [x.id, x]));
+
+export type ProductGrant =
+  | { type: 'cosmetic'; id: string }
+  | { type: 'pass' }
+  | { type: 'no_ads' }
+  | { type: 'resources'; coral: number; shine: number }
+  | { type: 'second_chance'; count: number }
+  | { type: 'save_slot' };
+
+export interface ProductDef {
+  id: string;
+  /** Price in Telegram Stars. */
+  stars: number;
+  grant: ProductGrant;
+  /** Can be bought only once (cosmetics, pass per season, no_ads). */
+  once?: boolean;
+  /** Purchases per UTC day. */
+  dailyLimit?: number;
+}
+
+/** Everything sold for Stars has known contents and no effect on PvP strength. */
+export const PRODUCTS: readonly ProductDef[] = [
+  { id: 'crab_azure', stars: 75, grant: { type: 'cosmetic', id: 'crab_azure' }, once: true },
+  { id: 'crab_coral', stars: 75, grant: { type: 'cosmetic', id: 'crab_coral' }, once: true },
+  { id: 'shell_candy', stars: 100, grant: { type: 'cosmetic', id: 'shell_candy' }, once: true },
+  { id: 'shell_galaxy', stars: 100, grant: { type: 'cosmetic', id: 'shell_galaxy' }, once: true },
+  { id: 'merge_rainbow', stars: 60, grant: { type: 'cosmetic', id: 'merge_rainbow' }, once: true },
+  { id: 'town_lanterns', stars: 80, grant: { type: 'cosmetic', id: 'town_lanterns' }, once: true },
+  { id: 'season_pass', stars: 250, grant: { type: 'pass' }, once: true },
+  { id: 'no_ads', stars: 150, grant: { type: 'no_ads' }, once: true },
+  { id: 'save_slot', stars: 100, grant: { type: 'save_slot' }, once: true },
+  { id: 'second_chance', stars: 25, grant: { type: 'second_chance', count: 1 }, dailyLimit: 5 },
+  { id: 'pack_coral_s', stars: 50, grant: { type: 'resources', coral: 500, shine: 5 }, dailyLimit: 1 },
+  { id: 'pack_coral_m', stars: 120, grant: { type: 'resources', coral: 1500, shine: 20 }, dailyLimit: 1 },
+];
+export const PRODUCT_BY_ID: ReadonlyMap<string, ProductDef> = new Map(PRODUCTS.map((x) => [x.id, x]));
+
+/** Season pass: XP comes from quests; the free track gives resources, the paid one cosmetics. */
+export const PASS_XP_PER_LEVEL = 100;
+export const PASS_LEVELS = 20;
+export interface PassReward {
+  level: number;
+  free: Cost;
+  premium: { cosmetic?: string; coral?: number; shine?: number };
+}
+export const PASS_REWARDS: readonly PassReward[] = Array.from({ length: PASS_LEVELS }, (_, i) => {
+  const level = i + 1;
+  const premium: PassReward['premium'] =
+    level === 5 ? { cosmetic: 'merge_bubbles' } : level === 12 ? { cosmetic: 'shell_pearl' } : level === 20 ? { cosmetic: 'crab_gold' } : { coral: 60 + 15 * level, shine: level % 2 === 0 ? 3 : 0 };
+  return { level, free: { coral: 30 + 10 * level, shine: level % 5 === 0 ? 5 : 0 }, premium };
+});
+
+// --- Rewarded ads --------------------------------------------------------------------------------------------
+
+export const AD_PLACEMENTS = ['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost'] as const;
+export type AdPlacement = (typeof AD_PLACEMENTS)[number];
+export const AD_DAILY_CAPS: Record<AdPlacement, number> = {
+  double_loot: 5,
+  second_chance: 1,
+  daily_chest: 1,
+  reroll: 6,
+  corf_boost: 3,
+};
+export const AD_DAILY_TOTAL = 12;
+export const DAILY_CHEST_REWARD: Cost = { coral: 80, shine: 3 };
+export const CORF_BOOST_MULT = 2;
+
+export const REFERRAL_REWARD: Cost = { coral: 150, shine: 5 };

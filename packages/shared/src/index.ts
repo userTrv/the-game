@@ -14,3 +14,7 @@ export * from './build';
 export * from './battle';
 export * from './offers';
 export * from './run';
+export * from './data/town';
+export * from './meta';
+export * from './liveops';
+export * from './api';
