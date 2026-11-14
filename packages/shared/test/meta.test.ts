@@ -21,7 +21,7 @@ describe('meta progression', () => {
     p = { ...p, coral: 1000, shine: 100 };
     p = upgradeBuilding(p, 'lighthouse');
     expect(p.buildings.lighthouse).toBe(1);
-    expect(p.coral).toBe(940);
+    expect(p.coral).toBe(920);
     expect(runConfigFor(p, 'hermit').maxStage).toBe(6);
     expect(upgradeBlocker(p, 'lighthouse')).toBe('best_stage');
     p = upgradeBuilding(upgradeBuilding(p, 'hatchery'), 'hatchery');
@@ -71,7 +71,7 @@ describe('meta progression', () => {
     let p = newProfile(0);
     p = { ...p, almanac: { ...p.almanac, guardians: ['moray'] } };
     const r = claimMilestone(p, 'guardians_1');
-    expect(r.profile.coral).toBe(60);
+    expect(r.profile.coral).toBe(30);
     expect(() => claimMilestone(r.profile, 'guardians_1')).toThrow('milestone_claimed');
     expect(() => claimMilestone(p, 'guardians_2')).toThrow('milestone_locked');
   });

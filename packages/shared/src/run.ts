@@ -1,13 +1,13 @@
 import { simulateBattle, type BattleResult } from './battle';
 import { buildFighter, computeMods, familyCounts, guardianFighter, slotCount, type Fighter } from './build';
-import { BAL, genesForTier, xpForTier, xpNeed } from './data/balance';
+import { BAL, feed, genesForTier, maxMealTier } from './data/balance';
 import { CREATURE_BY_ID } from './data/creatures';
 import { guardianDef } from './data/guardians';
 import { heroDef } from './data/heroes';
 import { mutationDef } from './data/mutations';
 import { MAX_SHELL_TIER } from './data/shells';
 import { tenantDef } from './data/tenants';
-import { generateOffers, generateShellChoices, generateShop, registerMaxHp, type Offer, type ShopItem } from './offers';
+import { generateOffers, generateShellChoices, generateShop, registerMaxHp, tenantPrice, type Offer, type ShopItem } from './offers';
 import { createRng, subSeed } from './rng';
 import { CHAPTER_STAGES, creatureTier, spawnTable, stageInfo } from './stages';
 import {
@@ -54,6 +54,8 @@ export interface CampState {
   offerTaken: boolean;
   shop: ShopItem[];
   rerolls: number;
+  /** A copy of a tenant already on the shell can be ordered once per camp. */
+  ordered?: boolean;
   /** Non-null while the crab has to pick a new shell first. */
   shellChoices: ShellInst[] | null;
 }
@@ -122,9 +124,13 @@ export interface RunState {
 }
 
 export interface HuntReport {
-  /** Creature id -> number eaten. */
-  eaten: Record<string, number>;
-  nodes: { oyster: number; coral: number; glitter: number };
+  /** Ordered meals as [creature id, tier]; the server replays growth from it. */
+  log?: [string, number][];
+  /** Compact form without order (tests, simulator): creature id -> number eaten at the stage tier. */
+  eaten?: Record<string, number>;
+  nodes: { oyster: number; coral: number; glitter: number; chest?: number };
+  /** Pearls dropped by slain predators. */
+  drops?: number;
   durationS: number;
   /** HP lost during the pool, absolute, after healing. May be negative (net heal). */
   hpLost: number;
@@ -136,6 +142,8 @@ export type RunAction =
   | { type: 'pick_offer'; index: number; slot?: number }
   | { type: 'skip_offer' }
   | { type: 'buy'; index: number; slot?: number }
+  /** Buys a ★ copy of the tenant sitting in slot `of`. */
+  | { type: 'order'; of: number; slot?: number }
   | { type: 'reroll'; free?: boolean }
   | { type: 'sell'; slot: number }
   | { type: 'move'; from: number; to: number }
@@ -358,20 +366,26 @@ export interface HuntCaps {
   maxOysters: number;
   maxCorals: number;
   maxGlitter: number;
+  maxChests: number;
   maxDuration: number;
 }
 
+/** Physical limits of a pool of the given length: how much a crab could possibly find and eat. */
 export function huntCaps(durationS: number): HuntCaps {
   const h = BAL.hunt;
   const d = Math.max(0, Math.min(h.hardMaxTime, durationS));
-  const respawns = Math.floor(d / h.nodeRespawnTime);
   return {
-    maxEaten: h.initialSpawn + Math.ceil((h.spawnRate[1] as number) * d) + 2,
-    maxOysters: h.oysters * (1 + respawns),
-    maxCorals: h.corals * (1 + respawns),
-    maxGlitter: 1 + respawns,
+    maxEaten: h.initialSpawn + Math.ceil((h.spawnRate[1] as number) * 1.3 * d) + 6,
+    maxOysters: 3 + Math.floor(d / 8),
+    maxCorals: 4 + Math.floor(d / 6),
+    maxGlitter: 1 + Math.floor(d / 45),
+    maxChests: 1 + Math.floor(d / 40),
     maxDuration: h.hardMaxTime,
   };
+}
+
+export function orderPrice(t: TenantInst): number {
+  return tenantPrice(t.id, 1) + BAL.orderExtra;
 }
 
 /**
@@ -391,42 +405,59 @@ function applyHunt(state: RunState, report: HuntReport, maxDurationS: number | u
   const modsBefore = runMods(state);
   const hero = heroDef(state.cfg.heroId);
 
-  // Sanitise: known creatures of this stage only, non-negative integers, total under the cap.
-  const eaten: [string, number][] = [];
-  let total = 0;
-  for (const [id, raw] of Object.entries(report.eaten ?? {})) {
-    const n = Math.floor(Number(raw));
-    if (!(n > 0) || !table.has(id)) {
-      if (n > 0) events.push({ type: 'clamped', what: `creature:${id}` });
-      continue;
+  // Meals in order. The compact form is replayed from the smallest fauna up, like a crab growing into a pool.
+  let log: [string, number][] = [];
+  if (Array.isArray(report.log)) {
+    for (const entry of report.log) {
+      if (Array.isArray(entry)) log.push([String(entry[0]), Math.floor(Number(entry[1]))]);
     }
-    eaten.push([id, n]);
-    total += n;
+  } else {
+    const groups: [string, number, number][] = [];
+    for (const [id, raw] of Object.entries(report.eaten ?? {})) {
+      const n = Math.floor(Number(raw));
+      if (n > 0) groups.push([id, table.get(id)?.tier ?? 0, Math.min(n, caps.maxEaten + 1)]);
+    }
+    groups.sort((a, b) => a[1] - b[1]);
+    for (const [id, tier, n] of groups) for (let i = 0; i < n; i++) log.push([id, tier]);
   }
-  if (total > caps.maxEaten) {
-    const k = caps.maxEaten / total;
-    for (const e of eaten) e[1] = Math.floor(e[1] * k);
+  const unknown = new Set<string>();
+  log = log.filter(([id]) => {
+    if (table.has(id)) return true;
+    unknown.add(id);
+    return false;
+  });
+  for (const id of unknown) events.push({ type: 'clamped', what: `creature:${id}` });
+  if (log.length > caps.maxEaten) {
+    // Thin out evenly so the order of what remains is kept.
+    const k = caps.maxEaten / log.length;
+    log = log.filter((_, i) => Math.floor((i + 1) * k) > Math.floor(i * k));
     events.push({ type: 'clamped', what: 'eaten' });
   }
 
   const lm = lootMult(state, stage, modsBefore);
   const geneBefore: DietMap = { ...state.genes };
-  let xp = 0;
-  for (const [id, n] of eaten) {
-    const def = CREATURE_BY_ID.get(id);
-    if (!def) continue;
-    const tier = creatureTier(stage, def);
-    xp += xpForTier(tier) * n;
-    state.genes[def.diet] += genesForTier(tier) * n * hero.geneMult * (1 + modsBefore.genePct / 100);
-    state.loot.coral += BAL.hunt.coralPerTier * tier * n * lm;
-    state.stats.eatenByDiet[def.diet] += n;
-    state.stats.eatenByCreature[id] = (state.stats.eatenByCreature[id] ?? 0) + n;
-    state.stats.eatenTotal += n;
+  const hpBefore = maxHpOf(state);
+  let predatorMeals = 0;
+  let tierClamped = false;
+  for (const [id, rawTier] of log) {
+    const entry = table.get(id);
+    if (!entry) continue;
+    const top = maxMealTier(state.size, entry.tier);
+    const tier = Math.max(entry.tier, Math.min(top, Number.isFinite(rawTier) ? rawTier : entry.tier));
+    if (tier !== rawTier) tierClamped = true;
+    if (tier > state.size) predatorMeals += 1;
+    const def = entry.def;
+    if (feed(state, tier, modsBefore.xpPct)) events.push({ type: 'grow', size: state.size });
+    state.genes[def.diet] += genesForTier(tier) * hero.geneMult * (1 + modsBefore.genePct / 100);
+    state.loot.coral += BAL.hunt.coralPerTier * tier * lm;
+    state.stats.eatenByDiet[def.diet] += 1;
+    state.stats.eatenByCreature[id] = (state.stats.eatenByCreature[id] ?? 0) + 1;
+    state.stats.eatenTotal += 1;
   }
-  state.xp += xp * (1 + modsBefore.xpPct / 100);
+  if (tierClamped && Array.isArray(report.log)) events.push({ type: 'clamped', what: 'tier' });
 
   const rng = createRng(subSeed(state.seed, 'nodes', stage, state.huntNonce));
-  const clampNode = (v: number, cap: number, what: string): number => {
+  const clampNode = (v: unknown, cap: number, what: string): number => {
     const n = Math.max(0, Math.floor(Number(v) || 0));
     if (n > cap) events.push({ type: 'clamped', what });
     return Math.min(n, cap);
@@ -434,22 +465,16 @@ function applyHunt(state: RunState, report: HuntReport, maxDurationS: number | u
   const oysters = clampNode(report.nodes?.oyster, caps.maxOysters, 'oyster');
   const corals = clampNode(report.nodes?.coral, caps.maxCorals, 'coral');
   const glitter = clampNode(report.nodes?.glitter, caps.maxGlitter, 'glitter');
-  let pearls = 0;
-  for (let i = 0; i < oysters; i++) pearls += rng.int(BAL.hunt.oysterPearls[0] as number, BAL.hunt.oysterPearls[1] as number);
-  pearls = Math.round(pearls * (1 + (modsBefore.pearlPct + (state.cfg.event?.pearlPct ?? 0)) / 100));
+  const chests = clampNode(report.nodes?.chest, caps.maxChests, 'chest');
+  const drops = clampNode(report.drops, predatorMeals + 2, 'drops');
+  const rawPearls = oysters * BAL.hunt.oysterPearls + chests * BAL.hunt.chestPearls + drops;
+  const pearls = Math.round(rawPearls * (1 + (modsBefore.pearlPct + (state.cfg.event?.pearlPct ?? 0)) / 100));
   state.pearls += pearls;
   state.stats.pearlsEarned += pearls;
+  state.loot.coral += chests * BAL.hunt.chestCoral * lm;
   for (let i = 0; i < corals; i++) state.loot.coral += rng.int(BAL.hunt.coralYield[0] as number, BAL.hunt.coralYield[1] as number) * lm;
   for (let i = 0; i < glitter; i++) state.loot.shine += rng.int(BAL.hunt.glitterYield[0] as number, BAL.hunt.glitterYield[1] as number) * lm;
   state.stats.huntSeconds += duration;
-
-  // Growth.
-  const hpBefore = maxHpOf(state);
-  while (state.xp >= xpNeed(state.size)) {
-    state.xp -= xpNeed(state.size);
-    state.size += 1;
-    events.push({ type: 'grow', size: state.size });
-  }
 
   // Gene thresholds -> guaranteed mutation offers.
   for (const d of DIETS) {
@@ -661,6 +686,21 @@ export function applyRunAction(
       state.pearls -= item.price;
       applyOffer(state, item.offer, action.slot, events);
       item.sold = true;
+      break;
+    }
+
+    case 'order': {
+      const c = campFree();
+      if (c.ordered) fail('order_used');
+      const src = state.slots[action.of];
+      if (!src) fail('empty_slot');
+      if (src.star >= 3) fail('order_max');
+      const price = orderPrice(src);
+      if (state.pearls < price) fail('no_pearls');
+      state.pearls -= price;
+      addTenant(state, { id: src.id, star: 1 }, action.slot, events);
+      c.ordered = true;
+      clampHp(state);
       break;
     }
 

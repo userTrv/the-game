@@ -10,6 +10,7 @@ import {
   BUILDINGS,
   CORF_CAP_HOURS,
   CORF_RATE_PER_HOUR,
+  GARDEN_MIN_POOL,
   LIGHTHOUSE_STAGES,
   TALENT_BY_ID,
   TALENTS,
@@ -32,6 +33,8 @@ export interface Profile {
   corfSince: number;
   stats: ProfileStats;
   tutorialDone: boolean;
+  /** Tenants switched off in the garden: they are not offered in runs. */
+  gardenOff?: string[];
 }
 
 export interface Almanac {
@@ -161,6 +164,26 @@ export function collectCorf(profile: Profile, now: number, mult = 1): { profile:
 export type EventModifier = NonNullable<RunConfig['event']>;
 
 /** Everything a run inherits from the town, talents and the current weekly event. */
+/** Tenants unlocked by the garden level, in data order. */
+export function gardenUnlocked(profile: Profile): string[] {
+  return TENANTS.filter((t) => t.unlock <= profile.buildings.garden).map((t) => t.id);
+}
+
+/** The run's tenant pool: unlocked tenants minus the ones the player switched off. */
+export function gardenPool(profile: Profile): string[] {
+  const all = gardenUnlocked(profile);
+  const off = new Set(profile.gardenOff ?? []);
+  const pool = all.filter((id) => !off.has(id));
+  return pool.length >= Math.min(GARDEN_MIN_POOL, all.length) ? pool : all;
+}
+
+export function setGardenOff(profile: Profile, off: readonly string[]): Profile {
+  const all = gardenUnlocked(profile);
+  const clean = [...new Set(off)].filter((id) => all.includes(id));
+  if (all.length - clean.length < Math.min(GARDEN_MIN_POOL, all.length)) throw new MetaError('garden_min');
+  return { ...profile, gardenOff: clean };
+}
+
 export function runConfigFor(profile: Profile, heroId: string, event?: EventModifier): RunConfig {
   if (!unlockedHeroes(profile).includes(heroId)) throw new MetaError('hero_locked');
   heroDef(heroId);
@@ -188,7 +211,7 @@ export function runConfigFor(profile: Profile, heroId: string, event?: EventModi
   const cfg: RunConfig = {
     heroId,
     maxStage: lighthouse,
-    tenantPool: TENANTS.filter((t) => t.unlock <= b.garden).map((t) => t.id),
+    tenantPool: gardenPool(profile),
     shellPool: SHELLS.filter((s) => !s.starter && s.unlock <= b.workshop).map((s) => s.id),
     mutSlots,
     mutMaxTier: b.lab >= 4 ? 3 : b.lab >= 3 ? 2 : 1,
@@ -302,11 +325,11 @@ export const ALMANAC_TOTALS = {
 };
 
 export const MILESTONES: readonly Milestone[] = [
-  ...[5, 12, 20, 28, CREATURES.length].map((need, i) => ({ id: `creatures_${need}`, kind: 'creatures' as const, need, reward: { coral: 40 * (i + 1) * (i + 1), shine: 2 * (i + 1) } })),
-  ...[6, 14, 24, 34, TENANTS.length].map((need, i) => ({ id: `tenants_${need}`, kind: 'tenants' as const, need, reward: { coral: 50 * (i + 1) * (i + 1), shine: 3 * (i + 1) } })),
-  ...[4, 8, SHELLS.length].map((need, i) => ({ id: `shells_${need}`, kind: 'shells' as const, need, reward: { coral: 80 * (i + 1) * (i + 1), shine: 4 * (i + 1) } })),
-  ...[1, 2, 3, 4].map((need, i) => ({ id: `guardians_${need}`, kind: 'guardians' as const, need, reward: { coral: 60 * (i + 1), shine: 5 * (i + 1) } })),
-  ...[3, 10, 20].map((need, i) => ({ id: `stars_${need}`, kind: 'stars' as const, need, reward: { coral: 120 * (i + 1) * (i + 1), shine: 8 * (i + 1) } })),
+  ...[5, 12, 20, 28, CREATURES.length].map((need, i) => ({ id: `creatures_${need}`, kind: 'creatures' as const, need, reward: { coral: 20 * (i + 1) * (i + 1), shine: i + 1 } })),
+  ...[6, 14, 24, 34, TENANTS.length].map((need, i) => ({ id: `tenants_${need}`, kind: 'tenants' as const, need, reward: { coral: 25 * (i + 1) * (i + 1), shine: 2 * (i + 1) } })),
+  ...[4, 8, SHELLS.length].map((need, i) => ({ id: `shells_${need}`, kind: 'shells' as const, need, reward: { coral: 40 * (i + 1) * (i + 1), shine: 2 * (i + 1) } })),
+  ...[1, 2, 3, 4].map((need, i) => ({ id: `guardians_${need}`, kind: 'guardians' as const, need, reward: { coral: 30 * (i + 1), shine: 3 * (i + 1) } })),
+  ...[3, 10, 20].map((need, i) => ({ id: `stars_${need}`, kind: 'stars' as const, need, reward: { coral: 60 * (i + 1) * (i + 1), shine: 4 * (i + 1) } })),
 ];
 
 export function milestoneProgress(almanac: Almanac, m: Milestone): number {

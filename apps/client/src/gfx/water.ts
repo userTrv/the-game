@@ -105,7 +105,6 @@ export class Water {
     this.root.addChild(this.bg, this.c1, this.c2, this.rays);
     for (let i = 0; i < 4; i++) {
       const g = new Graphics();
-      g.poly([0, 0, 46, 0, 150, 700, 40, 700]).fill({ color: look.ray, alpha: 0.07 });
       g.blendMode = 'add';
       g.x = 20 + i * 100;
       this.rays.addChild(g);
@@ -129,6 +128,21 @@ export class Water {
     this.c1.height = h;
     this.c2.width = w;
     this.c2.height = h;
+    // Light shafts span the whole screen and dissolve towards the bottom instead of ending abruptly.
+    const look = BIOME_LOOK[this.biome];
+    const steps = 14;
+    const len = h * 0.92;
+    this.rays.children.forEach((r) => {
+      const g = r as Graphics;
+      g.clear();
+      for (let s = 0; s < steps; s++) {
+        const a = s / steps;
+        const b = (s + 1) / steps;
+        const xl = (k: number): number => 40 * k;
+        const xr = (k: number): number => 46 + 104 * k;
+        g.poly([xl(a), len * a, xr(a), len * a, xr(b), len * b + 0.5, xl(b), len * b + 0.5]).fill({ color: look.ray, alpha: 0.075 * (1 - a) * (1 - a) });
+      }
+    });
     for (const b of this.bubbles) {
       b.s.x = Math.random() * w;
       b.s.y = Math.random() * h;

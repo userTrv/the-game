@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals';
-import { buildFighter, enemyFighter, stageInfo, type BattleEvent, type BiomeId, type BuildSnapshot, type Fighter, type PublicRun } from '@shellter/shared';
+import { buildFighter, enemyFighter, krakenFighter, stageInfo, type BattleEvent, type BiomeId, type BuildSnapshot, type Fighter, type PublicRun } from '@shellter/shared';
 import type { Sprite } from 'pixi.js';
 import { Container, Graphics } from 'pixi.js';
 import { sprite } from '../gfx/assets';
@@ -66,7 +66,7 @@ export class BattleScene implements Scene {
     const myBuild = buildOfRun(view.me);
     const eq = player.value?.cosmetics.equipped;
     if (eq) myBuild.skin = { crab: eq.crab, shell: eq.shell };
-    this.fighters = [buildFighter(myBuild), enemyFighter(view.enemy)];
+    this.fighters = [buildFighter(myBuild), view.kraken ? krakenFighter() : enemyFighter(view.enemy)];
     this.hp = [this.fighters[0].maxHp, this.fighters[1].maxHp];
 
     const me = new CrabView();

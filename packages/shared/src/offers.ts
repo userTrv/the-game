@@ -160,8 +160,11 @@ export function generateShop(state: RunState, rng: Rng): ShopItem[] {
   const taken = new Set<string>();
   const stage = state.camp?.after ?? state.stage;
   const star2Chance = Math.min(BAL.shopStar2Max, BAL.shopStar2PerStage * Math.max(0, stage - 3));
+  // The shop remembers the build: its first shelf holds a tenant that already lives on the shell.
+  const mine = new Map<string, number>();
+  for (const t of state.slots) if (t && t.star < 3 && weights.has(t.id)) mine.set(t.id, weights.get(t.id) as number);
   for (let i = 0; i < BAL.shopSize; i++) {
-    const id = pickTenant(weights, taken, rng);
+    const id = i === 0 && mine.size > 0 ? pickTenant(mine, taken, rng) : pickTenant(weights, taken, rng);
     if (id === null) break;
     taken.add(id);
     const star: Star = rng.chance(star2Chance) ? 2 : 1;

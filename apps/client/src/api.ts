@@ -58,6 +58,7 @@ export const api = {
   upgrade: (building: BuildingId) => call<P>('POST', '/api/town/upgrade', { building }),
   talent: (id: string) => call<P>('POST', '/api/town/talent', { id }),
   hero: (heroId: string) => call<P>('POST', '/api/town/hero', { heroId }),
+  garden: (off: string[]) => call<P>('POST', '/api/town/garden', { off }),
   corf: (adIntentId?: string) => call<P & { gained: number }>('POST', '/api/corf/collect', adIntentId ? { adIntentId } : {}),
   almanacClaim: (id: string) => call<P & { reward: Cost }>('POST', '/api/almanac/claim', { id }),
   questClaim: (id: string) => call<P & { reward: Cost }>('POST', '/api/quests/claim', { id }),

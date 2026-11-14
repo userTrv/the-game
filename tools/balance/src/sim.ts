@@ -1,6 +1,7 @@
 import {
   applyRunAction,
   BAL,
+  feed,
   BUILDINGS,
   createRng,
   DIETS,
@@ -15,8 +16,6 @@ import {
   startRun,
   tenantDef,
   wouldMerge,
-  xpForTier,
-  xpNeed,
   type Diet,
   type Offer,
   type Profile,
@@ -86,10 +85,10 @@ function hunt(state: RunState, policy: Policy, rng: Rng): RunAction {
   const picky = policy.diets.length > 0 ? 0.85 : 1;
   const attempts = Math.round(spawned * SKILL * picky * (0.85 + rng.next() * 0.3));
   const total = table.reduce((sum, e) => sum + e.weight, 0);
-  const eaten: Record<string, number> = {};
+  const log: [string, number][] = [];
   // The crab grows during the pool, exactly like in the client: bigger fauna becomes food on the way.
-  let size = state.size;
-  let xp = state.xp;
+  const g = { size: state.size, xp: state.xp };
+  let size = g.size;
   let misses = 0;
   for (let i = 0; i < attempts; i++) {
     // A bite lands only if the creature that swam by is small enough; among food the bot prefers its diet.
@@ -100,19 +99,16 @@ function hunt(state: RunState, policy: Policy, rng: Rng): RunAction {
       continue;
     }
     const e = edible[rng.weightedIndex(edible.map((x) => x.weight * (policy.diets.includes(x.def.diet) ? 4 : 1)))] as (typeof table)[number];
-    eaten[e.def.id] = (eaten[e.def.id] ?? 0) + 1;
-    xp += xpForTier(e.tier);
-    while (xp >= xpNeed(size)) {
-      xp -= xpNeed(size);
-      size += 1;
-    }
+    log.push([e.def.id, e.tier]);
+    feed(g, e.tier, 0);
+    size = g.size;
   }
   const edibleShare = attempts > 0 ? 1 - misses / attempts : 1;
   const danger = 1 - edibleShare;
   const hpLost = maxHpOf(state) * (0.05 + 0.3 * danger) * (0.5 + rng.next());
   return {
     type: 'hunt_done',
-    report: { eaten, nodes: { oyster: rng.int(2, 4), coral: rng.int(2, 4), glitter: rng.chance(0.4) ? 1 : 0 }, durationS: HUNT_SECONDS, hpLost, ko: false },
+    report: { log, nodes: { oyster: rng.int(2, 4), coral: rng.int(2, 4), glitter: rng.chance(0.4) ? 1 : 0, chest: rng.chance(0.3) ? 1 : 0 }, drops: rng.int(0, 2), durationS: HUNT_SECONDS, hpLost, ko: false },
   };
 }
 

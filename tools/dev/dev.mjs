@@ -6,6 +6,8 @@ const env = {
   ...process.env,
   DATABASE_URL: process.env.DATABASE_URL ?? 'pglite://.pglite',
   DEV_AUTH: 'true',
+  // Pinned: a launcher that exports PORT for the client must not move the game server onto it.
+  PORT: '3000',
   JWT_SECRET: 'dev-jwt-secret',
   BOT_TOKEN: '123456:DEV',
   INTERNAL_SECRET: 'dev-internal',

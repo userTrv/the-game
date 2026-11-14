@@ -445,7 +445,7 @@ export function BattleView(): JSX.Element | null {
     }
     return { text: t(`battle.${k === 'claw' ? 'claw' : k}`), spr: k === 'claw' ? 'icon/claws' : undefined };
   };
-  const boss = b.enemy.kind === 'guardian' && guardianDef(b.enemy.id).boss;
+  const boss = !b.kraken && b.enemy.kind === 'guardian' && guardianDef(b.enemy.id).boss;
   return (
     <div class="screen pass" id="battle">
       <div class="vs">

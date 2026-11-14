@@ -1,6 +1,6 @@
 import { useSignal } from '@preact/signals';
 import {
-  ALMANAC_REWARD_MULT, BUILDING_DEFS, BUILDINGS, CORF_RATE_PER_HOUR, HEROES, LIGHTHOUSE_STAGES, MILESTONES, SHELLS, TALENTS, TENANTS, CREATURES, GUARDIANS,
+  ALMANAC_REWARD_MULT, BUILDING_DEFS, BUILDINGS, CORF_RATE_PER_HOUR, HEROES, LIGHTHOUSE_STAGES, MILESTONES, QUEST_BY_ID, SHELLS, TALENTS, TENANTS, CREATURES, GUARDIANS,
   milestoneProgress, talentCost, unlockedHeroes, upgradeBlocker, upgradeCost,
   type BuildingId, type PlayerView,
 } from '@shellter/shared';
@@ -235,7 +235,7 @@ export function HomeView(): JSX.Element | null {
     if (r) screen.value = screenForRun(r);
     else void startRun(p.profile.heroId);
   };
-  const questsReady = [...p.quests.daily, ...p.quests.weekly].filter((q) => !q.claimed && q.progress > 0).length;
+  const questsReady = [...p.quests.daily, ...p.quests.weekly].filter((q) => !q.claimed && q.progress >= (QUEST_BY_ID.get(q.id)?.need ?? Infinity)).length;
   const firstTime = p.profile.stats.runs <= 1 && p.profile.buildings.lighthouse === 0;
   const lanterns = p.cosmetics.equipped.town === 'town_lanterns';
   return (
