@@ -126,9 +126,9 @@ export function EventsSheet(): JSX.Element | null {
   return (
     <Sheet title={t('events.title')} onClose={close} id="events-sheet">
       <div class="tabs">
-        <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>🌊 {t('nav.events')}</button>
-        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>🐙 {t('kraken.title')}</button>
-        <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>🏆 {t('league.title')}</button>
+        <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>{t('nav.events')}</button>
+        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button>
+        <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>{t('league.title')}</button>
       </div>
       <div class="scroll list" style={{ minHeight: '330px' }}>
         {tab.value === 'event' ? (
@@ -174,7 +174,7 @@ export function EventsSheet(): JSX.Element | null {
         {tab.value === 'league' && l ? (
           <>
             <div class="panel light col">
-              <div class="row between"><span class="h2">🏆 {t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
+              <div class="row between"><span class="h2">{t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
               <div class="muted small">{t('league.desc')}</div>
               <div class="row wrap" style={{ gap: '4px' }}>{LEAGUES.map((x) => <span class="chip tiny" key={x.id} style={{ opacity: x.id === l.league.league ? 1 : 0.5 }}>{t(`league.${x.id}`)} {x.min}+</span>)}</div>
               {l.league.season ? <div class="tiny muted">{t('league.season', { t: duration(l.league.season.endsAt - now) })}{l.league.myRank ? ` · ${t('events.rank', { n: l.league.myRank })}` : ''}</div> : null}
@@ -259,7 +259,7 @@ export function ShopSheet(): JSX.Element | null {
       <div class="scroll list" style={{ minHeight: '360px' }}>
         {chestLeft ? (
           <div class="item">
-            <span style={{ fontSize: '30px' }}>🎁</span>
+            <Spr id="node/chest" size={40} />
             <div class="grow"><b>{t('shop.chest')}</b><div class="row tiny muted">{t('shop.chest.desc')} · <CostView cost={DAILY_CHEST_REWARD} /></div></div>
             <Btn class="sm gold" id="chest-btn" onClick={() => void chest()}><Spr id="icon/ad" size={18} />{t('common.free')}</Btn>
           </div>

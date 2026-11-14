@@ -179,17 +179,17 @@ function vignetteTexture(): Texture {
   });
 }
 
-const painted = new Map<string, Texture | null>();
+let painted: Texture | null | undefined;
+const PAINT_TINT: Record<string, number> = { lagoon: 0xffffff, wreck: 0xe8f0c8, abyss: 0xb9c2ff, trench: 0xd9a8ff };
 
-/** Optional painted backdrop of a biome (`public/assets/img/deep_<biome>.jpg`); null when the file is absent. */
-export async function loadBackdrop(biome: BiomeId): Promise<void> {
-  const key = biome === 'trench' ? 'abyss' : biome;
-  if (painted.has(key)) return;
-  painted.set(key, null);
+/** Painted far backdrop (`public/assets/img/deep.jpg`), shared by all biomes and tinted per biome. Optional. */
+export async function loadBackdrop(): Promise<void> {
+  if (painted !== undefined) return;
+  painted = null;
   try {
-    const t = await Assets.load<Texture>(`${import.meta.env.BASE_URL}assets/img/deep_${key}.jpg`);
+    const t = await Assets.load<Texture>(`${import.meta.env.BASE_URL}assets/img/deep.jpg`);
     t.source.addressMode = 'mirror-repeat';
-    painted.set(key, t);
+    painted = t;
   } catch {
     /* no painted backdrop: the procedural layers are enough */
   }
@@ -241,8 +241,8 @@ export class Deep {
       return layer;
     };
 
-    const art = painted.get(biome === 'trench' ? 'abyss' : biome);
-    if (art) add(art, 0.3, { alpha: 0.9, scale: 0.75, tint: biome === 'trench' ? 0xd9a8ff : 0xffffff });
+    const art = painted;
+    if (art) add(art, 0.3, { alpha: 0.9, scale: 0.75, tint: PAINT_TINT[biome] ?? 0xffffff });
     add(hazeTexture(), 0.18, { alpha: art ? 0.5 : 0.9, tint: look.haze, scale: 2.2, add: true, vx: 2, vy: 1 });
     add(hazeTexture(), 0.42, { alpha: art ? 0.35 : 0.6, tint: look.glow, scale: 1.1, add: true, vx: -3, vy: 2 });
     add(motesTexture(3, 90, 2), 0.62, { alpha: 0.5, tint: look.glow, add: true, vx: 3, vy: -4 });

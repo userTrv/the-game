@@ -2,6 +2,7 @@ import { effect } from '@preact/signals';
 import { render } from 'preact';
 import { startDirector } from './director';
 import { loadAtlas } from './gfx/assets';
+import { loadBackdrop } from './gfx/deep';
 import { calm } from './gfx/fx';
 import { initStage, setPaused, takeFps } from './gfx/stage';
 import { t } from './i18n';
@@ -28,6 +29,7 @@ async function boot(): Promise<void> {
     await Promise.all([
       initStage(stage).then(step),
       loadAtlas('core').then(step),
+      loadBackdrop(),
       authenticate().then(step),
     ]);
     await refreshMe().catch(() => undefined);

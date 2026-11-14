@@ -14,9 +14,9 @@ import { battleHud, battleSpeed, buildOfRun } from '../scenes/battle';
 import { huntHud } from '../scenes/hunt';
 import { sfx } from '../sound';
 import { act, battle, busy, ended, haptic, lastEvents, meta, panel, player, run, screen, screenForRun, showToast, track } from '../state';
-import { abilityText, Bar, Btn, DietIcon, flyIcons, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
+import { abilityText, Bar, Btn, DietIcon, flyIcons, Ico, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
 
-const DIET_STATUS: Record<string, string> = { poison: '☠', blind: '💫', stun: '⚡', weak: '⬇', slow: '🐌', mark: '🎯' };
+const DIET_STATUS: Record<string, string> = { poison: '☠\uFE0E', blind: '◌', stun: 'ϟ', weak: '▾', slow: '≈', mark: '◎' };
 
 // --- Hunt HUD -------------------------------------------------------------------------------------
 
@@ -43,7 +43,7 @@ export function HuntHudView(): JSX.Element | null {
         <div class="col" style={{ alignItems: 'flex-end', gap: '5px' }}>
           <div class="row" style={{ gap: '5px' }}>
             <Res kind="pearl" value={r.pearls + h.pearls} />
-            <button class="icon-btn" aria-label={t('settings.title')} onClick={() => { hunt()?.setPaused(true); panel.value = 'settings'; }}>⚙</button>
+            <button class="icon-btn" aria-label={t('settings.title')} onClick={() => { hunt()?.setPaused(true); panel.value = 'settings'; }}><Ico id="settings" /></button>
           </div>
           <span class="chip tiny">{t('hunt.stage', { n: r.stage })} · {t(`biome.${info.biome}`)}</span>
           <div class={`danger ${h.danger >= 1 ? 'over' : ''}`} style={{ width: '120px' }} title={t('hunt.danger')}><i style={{ width: `${Math.min(1, h.danger) * 100}%` }} /></div>
@@ -438,7 +438,7 @@ export function CampView(): JSX.Element | null {
         <div class="row" style={{ gap: '5px' }}>
           <Res kind="pearl" value={r.pearls} id="camp-pearls" />
           <span class="chip" title={t('camp.lives')}>{Array.from({ length: Math.max(r.lives, 0) }).map((_, i) => <Spr id="icon/life" size={18} key={i} />)}</span>
-          <button class="icon-btn" aria-label={t('settings.title')} onClick={() => (panel.value = 'settings')}>⚙</button>
+          <button class="icon-btn" aria-label={t('settings.title')} onClick={() => (panel.value = 'settings')}><Ico id="settings" /></button>
         </div>
       </div>
       <div class="row between" style={{ marginTop: '6px' }}>
@@ -585,7 +585,7 @@ export function BattleView(): JSX.Element | null {
         </div>
         <div class="chip" style={{ marginTop: '14px' }}>{h.time.toFixed(0)}</div>
         <div class="side r">
-          <b class="shadow-text">{b.kraken ? t('guardian.kraken') : enemyName(b.enemy)}{boss ? ' 👑' : ''}</b>
+          <b class="shadow-text">{b.kraken ? t('guardian.kraken') : enemyName(b.enemy)}</b>
           <Bar value={h.hp[1]} max={h.max[1]} shield={h.shield[1]} kind="red" label={b.kraken ? '∞' : `${Math.ceil(h.hp[1])}`} />
           <div class="status">{h.status[1].map((s) => <span key={s}>{DIET_STATUS[s] ?? ''}</span>)}{b.enemy.kind === 'ghost' ? <span class="tiny muted">{t('battle.ghost')}</span> : null}</div>
         </div>
@@ -721,7 +721,7 @@ export function ResultView(): JSX.Element | null {
         <div class="muted small">
           {t('result.stage', { n: e.last.stats.maxStage })} · {t('result.eaten', { n: e.last.stats.eatenTotal })} · {t('result.merges', { n: e.last.stats.merges[0] + e.last.stats.merges[1] })}
         </div>
-        {fresh > 0 ? <div class="small">📖 {t('result.new', { n: fresh })}</div> : null}
+        {fresh > 0 ? <div class="small">{t('result.new', { n: fresh })}</div> : null}
         {e.questsCompleted.length > 0 ? <div class="small" style={{ color: 'var(--green)' }}>✓ {t('result.quests', { n: e.questsCompleted.length })}</div> : null}
         {s.chapterCleared ? <div class="small" style={{ color: 'var(--gold)' }}>{t('result.chapter')}</div> : null}
         {e.last.stats.maxStage >= CHAPTER_STAGES && s.chapterCleared ? null : null}

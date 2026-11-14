@@ -29,6 +29,24 @@ export function Spr(props: { id: string; size?: number; class?: string; style?: 
   );
 }
 
+const ICONS = {
+  quests: 'M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
+  events: 'M2 9c3-4 6-4 9 0s6 4 11 0M2 16c3-4 6-4 9 0s6 4 11 0',
+  almanac: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M9 8h6',
+  shop: 'M5 8h14l-1 13H6zM9 8V6a3 3 0 0 1 6 0v2',
+  inbox: 'M3 6h18v12H3zM3 7l9 7 9-7',
+  settings: 'M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4',
+  medal: 'M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z',
+  close: 'M6 6l12 12M18 6L6 18',
+  pause: 'M9 5v14M15 5v14',
+  next: 'M9 5l7 7-7 7',
+} as const;
+
+/** Line icon drawn with the text colour. */
+export function Ico(props: { id: keyof typeof ICONS; size?: number }): JSX.Element {
+  return <svg class="ico" viewBox="0 0 24 24" style={props.size ? { width: `${props.size}px`, height: `${props.size}px` } : undefined} aria-hidden="true"><path d={ICONS[props.id]} /></svg>;
+}
+
 export function Btn(props: { class?: string; onClick?: () => void; disabled?: boolean; children: ComponentChildren; id?: string; sound?: Parameters<typeof sfx>[0] }): JSX.Element {
   return (
     <button
