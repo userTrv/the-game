@@ -65,6 +65,7 @@ test('first session: pools, camp, merge, guardian, carry-out, town, purchase, ad
     await playPool(page, 45, 26);
     await reachCamp(page);
     await page.click('#offer-0');
+    await page.click('#detail-take');
     await page.waitForTimeout(800);
     await page.click('#descend-btn');
   });
@@ -75,6 +76,7 @@ test('first session: pools, camp, merge, guardian, carry-out, town, purchase, ad
     await playPool(page, 45, 26);
     await reachCamp(page);
     await page.click('#offer-0');
+    await page.click('#detail-take');
     await page.waitForTimeout(1400);
   });
 

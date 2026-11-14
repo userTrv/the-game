@@ -125,6 +125,13 @@ export const ru: Record<string, string> = {
   'camp.role.front': 'Любит передний ряд',
   'camp.role.back': 'Любит задний ряд',
   'camp.role.any': 'Любой ряд',
+  'camp.take': 'Взять',
+  'camp.buy': 'Купить',
+  'camp.have': 'На раковине {n} из {need}',
+  'camp.out.merge': 'Сольётся в {n}★',
+  'camp.out.slot': 'Сядет в свободный слот',
+  'camp.out.replace': 'Раковина полна: придётся кого-то выселить',
+  'camp.order': 'Ещё такого',
   'camp.merge': 'Слияние!',
   'camp.nopearls': 'Не хватает жемчуга',
 

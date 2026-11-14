@@ -1,6 +1,6 @@
 import { useSignal } from '@preact/signals';
 import {
-  BAL, CHAPTER_STAGES, DIETS, familyCounts, frontCount, guardianDef, mutationDef, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
+  BAL, CHAPTER_STAGES, DIETS, familyCounts, frontCount, guardianDef, heroDef, mutationDef, orderPrice, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
   SET_THRESHOLDS, shellDef, slotCount, stageInfo, tenantDef, wouldMerge, xpNeed,
   type Diet, type Enemy, type Offer, type PublicRun, type TenantInst,
 } from '@shellter/shared';
@@ -14,7 +14,7 @@ import { battleHud, battleSpeed, buildOfRun } from '../scenes/battle';
 import { huntHud } from '../scenes/hunt';
 import { sfx } from '../sound';
 import { act, battle, busy, ended, haptic, lastEvents, meta, panel, player, run, screen, screenForRun, showToast, track } from '../state';
-import { Bar, Btn, DietIcon, flyIcons, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
+import { abilityText, Bar, Btn, DietIcon, flyIcons, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
 
 const DIET_STATUS: Record<string, string> = { poison: '☠', blind: '💫', stun: '⚡', weak: '⬇', slow: '🐌', mark: '🎯' };
 
@@ -75,6 +75,97 @@ function offerDiets(o: Offer): Diet[] {
   return [];
 }
 
+function ownedCount(r: PublicRun, id: string, star: number): number {
+  return r.slots.reduce((n, x) => n + (x && x.id === id && x.star === star ? 1 : 0), 0);
+}
+
+/** Progress towards a merge: filled dots are copies on the shell, the ringed one is this card. */
+function MergePips(props: { have: number; need: number; full: boolean }): JSX.Element {
+  return (
+    <span class={`pips ${props.full ? 'full' : ''}`}>
+      {Array.from({ length: props.need }).map((_, i) => <i class={i < props.have ? 'on' : i === props.have ? 'next' : ''} key={i} />)}
+    </span>
+  );
+}
+
+/** Everything about an offer before the player commits: what it does at every star and what happens on the shell. */
+function OfferDetail(props: { offer: Offer; r: PublicRun; price?: number; onTake: () => void; onClose: () => void }): JSX.Element {
+  const { offer: o, r } = props;
+  const afford = props.price === undefined || r.pearls >= props.price;
+  let head: JSX.Element;
+  let lines: JSX.Element | null = null;
+  let outcome: string | null = null;
+  if (o.type === 'tenant') {
+    const def = tenantDef(o.id);
+    const need = heroDef(r.cfg.heroId).mergeCount;
+    const have = ownedCount(r, o.id, o.star);
+    const merge = wouldMerge({ ...r, seed: '' }, o.id, o.star);
+    outcome = merge ? t('camp.out.merge', { n: o.star + 1 }) : r.slots.includes(null) ? t('camp.out.slot') : t('camp.out.replace');
+    head = (
+      <div class="row" style={{ alignItems: 'flex-start', gap: '12px' }}>
+        <Spr id={`tenant/${o.id}`} size={84} />
+        <div class="col grow" style={{ gap: '4px' }}>
+          <div class="h2">{name('tenant', o.id)} <Stars n={o.star} /></div>
+          <div class="row wrap" style={{ gap: '4px' }}>
+            {def.families.map((d) => <span class={`set diet-${d}`} key={d}><DietIcon diet={d} size={14} />{t(`diet.${d}`)}</span>)}
+          </div>
+          <div class="muted small">{t(`camp.role.${def.role}`)}</div>
+          <div class="row small" style={{ gap: '6px' }}><MergePips have={have} need={need} full={merge} />{t('camp.have', { n: have, need })}</div>
+        </div>
+      </div>
+    );
+    lines = (
+      <div class="starlines">
+        {([1, 2, 3] as const).map((st) => (
+          <div class={st === o.star ? 'cur' : ''} key={st}><Stars n={st} /><span>{abilityText(def.ability, st)}</span></div>
+        ))}
+      </div>
+    );
+  } else if (o.type === 'mutation') {
+    const def = mutationDef(o.id);
+    const cur = r.mutations[def.slot];
+    if (cur && cur.id !== o.id) outcome = t('camp.mutation.replaces', { name: name('mut', cur.id) });
+    head = (
+      <div class="row" style={{ alignItems: 'flex-start', gap: '12px' }}>
+        <Spr id={`icon/${def.slot}`} size={72} />
+        <div class="col grow" style={{ gap: '4px' }}>
+          <div class="h2">{name('mut', o.id)}</div>
+          <div class="row"><span class={`set diet-${def.diet}`}><DietIcon diet={def.diet} size={14} />{t(`diet.${def.diet}`)}</span></div>
+          <div class="muted small">{name('slot', def.slot)}</div>
+        </div>
+      </div>
+    );
+    lines = (
+      <div class="starlines">
+        {def.tiers.map((m, i) => <div class={i + 1 === o.tier ? 'cur' : ''} key={i}><b>{t('camp.tier', { n: i + 1 })}</b><span>{modLines(m).join(', ')}</span></div>)}
+      </div>
+    );
+  } else {
+    head = (
+      <div class="row" style={{ gap: '12px' }}>
+        <Spr id="icon/heart" size={64} />
+        <div class="col grow" style={{ gap: '4px' }}>
+          <div class="h2">{t('camp.heal')}</div>
+          <div class="muted small">{t('camp.heal.desc', { n: o.pct })}</div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Sheet onClose={props.onClose} id="offer-detail">
+      {head}
+      {lines}
+      {outcome ? <div class="small" style={{ color: 'var(--gold)' }}>{outcome}</div> : null}
+      <div class="row" style={{ gap: '8px' }}>
+        <Btn class="ghost" id="detail-cancel" onClick={props.onClose}>{t('common.cancel')}</Btn>
+        <Btn class="ok grow" id="detail-take" disabled={!afford} onClick={props.onTake}>
+          {props.price !== undefined ? <>{t('camp.buy')} <Spr id="icon/pearl" size={18} />{props.price}</> : t('camp.take')}
+        </Btn>
+      </div>
+    </Sheet>
+  );
+}
+
 function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: boolean; onPick: () => void; id: string }): JSX.Element {
   const { offer: o, r } = props;
   const diets = offerDiets(o);
@@ -84,12 +175,13 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
   let body: JSX.Element;
   if (o.type === 'tenant') {
     const merge = wouldMerge({ ...r, seed: '' }, o.id, o.star);
+    const have = ownedCount(r, o.id, o.star);
     body = (
       <>
         <Spr id={`tenant/${o.id}`} size={50} />
         <div class="nm">{name('tenant', o.id)} <Stars n={o.star} /></div>
         <div class="ds">{tenantText(o.id, o.star)}</div>
-        {merge ? <div class="tiny" style={{ color: 'var(--gold)' }}>★ {t('camp.merge')}</div> : null}
+        {have > 0 ? <MergePips have={have} need={heroDef(r.cfg.heroId).mergeCount} full={merge} /> : null}
       </>
     );
   } else if (o.type === 'mutation') {
@@ -132,14 +224,14 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
   );
 }
 
-function SlotStrip(props: { r: PublicRun; selected: number | null; onTap: (i: number) => void; merged: number[] }): JSX.Element {
+function SlotStrip(props: { r: PublicRun; selected: number | null; onTap: (i: number) => void; merged: number[]; same?: string | null }): JSX.Element {
   const { r } = props;
   const fc = frontCount(r.slots.length);
   const cell = (tn: TenantInst | null, i: number): JSX.Element => {
     const def = tn ? tenantDef(tn.id) : null;
     const row = i < fc ? 'front' : 'back';
     return (
-      <button class={`slot ${row} ${props.selected === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''}`} key={`${i}-${tn?.id ?? 'x'}-${tn?.star ?? 0}`} id={`slot-${i}`} onClick={() => props.onTap(i)}>
+      <button class={`slot ${row} ${props.selected === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''} ${tn && props.same === tn.id ? 'same' : ''}`} key={`${i}-${tn?.id ?? 'x'}-${tn?.star ?? 0}`} id={`slot-${i}`} onClick={() => props.onTap(i)}>
         {tn ? <Spr id={`tenant/${tn.id}`} size={34} /> : <span class="tiny muted">+</span>}
         {tn ? <Stars n={tn.star} /> : null}
         {def && def.role === row ? <span class="ok">✓</span> : null}
@@ -205,7 +297,8 @@ export function CampView(): JSX.Element | null {
   const r = run.value;
   const p = player.value;
   const selected = useSignal<number | null>(null);
-  const pending = useSignal<{ kind: 'offer' | 'buy'; index: number } | null>(null);
+  const pending = useSignal<{ kind: 'offer' | 'buy' | 'order'; index: number } | null>(null);
+  const detail = useSignal<{ kind: 'offer' | 'buy'; index: number; offer: Offer; price?: number } | null>(null);
   const confirmCarry = useSignal(false);
   const merged = useSignal<number[]>([]);
   const tut = useSignal<string | null>(null);
@@ -253,24 +346,48 @@ export function CampView(): JSX.Element | null {
   const up = evs.filter((e) => e.type === 'gene_threshold').map((e) => (e.type === 'gene_threshold' ? e.diet : 'sting'));
 
   const needsSlot = (o: Offer): boolean => o.type === 'tenant' && !r.slots.includes(null) && !wouldMerge({ ...r, seed: '' }, o.id, o.star);
-  const take = async (kind: 'offer' | 'buy', index: number, slot?: number): Promise<void> => {
-    const base = kind === 'offer' ? { type: 'pick_offer' as const, index } : { type: 'buy' as const, index };
+  const take = async (kind: 'offer' | 'buy' | 'order', index: number, slot?: number): Promise<void> => {
+    const base = kind === 'offer' ? { type: 'pick_offer' as const, index } : kind === 'buy' ? { type: 'buy' as const, index } : { type: 'order' as const, of: index };
     const res = await act(slot !== undefined ? { ...base, slot } : base);
     pending.value = null;
-    if (res && kind === 'buy') sfx('buy');
+    if (res && kind !== 'offer') sfx('buy');
     track('tutorial_step', { step: `camp_${kind}_${after}` });
   };
+  /** A tap on a card only opens its description; nothing is taken or bought without a confirmation. */
   const pick = (kind: 'offer' | 'buy', index: number, o: Offer, price?: number): void => {
     if (busy.value) return;
-    if (price !== undefined && r.pearls < price) return showToast(t('camp.nopearls'));
-    if (needsSlot(o)) {
-      pending.value = { kind, index };
+    selected.value = null;
+    pending.value = null;
+    detail.value = price !== undefined ? { kind, index, offer: o, price } : { kind, index, offer: o };
+  };
+  const confirm = (): void => {
+    const d = detail.value;
+    if (!d || busy.value) return;
+    detail.value = null;
+    if (d.price !== undefined && r.pearls < d.price) return showToast(t('camp.nopearls'));
+    if (needsSlot(d.offer)) {
+      pending.value = { kind: d.kind, index: d.index };
       return;
     }
-    void take(kind, index);
+    void take(d.kind, d.index);
+  };
+  const order = (i: number): void => {
+    const src = r.slots[i];
+    if (!src || busy.value) return;
+    selected.value = null;
+    if (r.pearls < orderPrice(src)) return showToast(t('camp.nopearls'));
+    if (needsSlot({ type: 'tenant', id: src.id, star: 1 })) {
+      pending.value = { kind: 'order', index: i };
+      return;
+    }
+    void take('order', i);
   };
   const tapSlot = (i: number): void => {
-    if (pending.value) return void take(pending.value.kind, pending.value.index, i);
+    if (pending.value) {
+      // The tenant being copied cannot be the one evicted.
+      if (pending.value.kind === 'order' && pending.value.index === i) return;
+      return void take(pending.value.kind, pending.value.index, i);
+    }
     if (selected.value === null) {
       if (r.slots[i]) selected.value = i;
       return;
@@ -338,14 +455,24 @@ export function CampView(): JSX.Element | null {
       {tut.value ? <div class="hint shadow-text" style={{ marginTop: 0, marginBottom: '6px', fontSize: '14px' }} id="camp-tut">{t(tut.value)}</div> : null}
       <div class="panel col" style={{ gap: '8px', padding: '10px' }}>
         <SetChips r={r} />
-        <SlotStrip r={r} selected={selected.value} onTap={tapSlot} merged={merged.value} />
-        {pending.value ? <div class="tiny center" style={{ color: 'var(--gold)' }}>{t('camp.replace')}</div> : null}
+        <SlotStrip r={r} selected={selected.value} onTap={tapSlot} merged={merged.value} same={sel?.id ?? null} />
+        {pending.value ? (
+          <div class="row between" id="replace-row">
+            <span class="small" style={{ color: 'var(--gold)' }}>{t('camp.replace')}</span>
+            <Btn class="sm ghost" id="replace-cancel" onClick={() => (pending.value = null)}>{t('common.cancel')}</Btn>
+          </div>
+        ) : null}
         {sel && selected.value !== null ? (
           <div class="row between">
             <div class="grow small">
               <b>{name('tenant', sel.id)}</b> <Stars n={sel.star} />
               <div class="muted tiny">{tenantText(sel.id, sel.star)} · {t(`camp.role.${tenantDef(sel.id).role}`)}</div>
             </div>
+            {camp && !waitingBattle && !camp.ordered && sel.star < 3 ? (
+              <Btn class="sm" id="order-btn" disabled={r.pearls < orderPrice(sel)} onClick={() => { const i = selected.value; if (i !== null) order(i); }}>
+                {t('camp.order')} <Spr id="icon/pearl" size={15} />{orderPrice(sel)}
+              </Btn>
+            ) : null}
             <Btn class="sm ghost" id="sell-btn" sound="sell" onClick={() => { const i = selected.value; selected.value = null; if (i !== null) void act({ type: 'sell', slot: i }); }}>
               {t('camp.sell', { n: (BAL.sellPrice[tenantDef(sel.id).rarity - 1] ?? 1) * 3 ** (sel.star - 1) })}
             </Btn>
@@ -391,6 +518,7 @@ export function CampView(): JSX.Element | null {
           </span>
         </Btn>
       </div>
+      {detail.value ? <OfferDetail offer={detail.value.offer} r={r} price={detail.value.price} onTake={confirm} onClose={() => (detail.value = null)} /> : null}
       {camp?.shellChoices ? (
         <Sheet mid title={t('camp.shell.title')} id="shell-sheet">
           <div class="muted small">{t('camp.shell.sub')}</div>

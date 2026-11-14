@@ -125,6 +125,13 @@ export const en: Record<string, string> = {
   'camp.role.front': 'Likes the front row',
   'camp.role.back': 'Likes the back row',
   'camp.role.any': 'Any row',
+  'camp.take': 'Take',
+  'camp.buy': 'Buy',
+  'camp.have': '{n} of {need} on the shell',
+  'camp.out.merge': 'Merges into {n}★',
+  'camp.out.slot': 'Takes a free slot',
+  'camp.out.replace': 'The shell is full: someone has to leave',
+  'camp.order': 'One more',
   'camp.merge': 'Merge!',
   'camp.nopearls': 'Not enough pearls',
 

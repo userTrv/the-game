@@ -207,5 +207,17 @@ input[type='text'] { font: inherit; color: inherit; background: rgba(8, 14, 44, 
 @media (min-width: 560px) { #stage, #ui { left: 50%; right: auto; width: 480px; transform: translateX(-50%); } body { background: #071a33; } }
 
 #shop .card { min-height: 104px; padding: 8px 3px 6px; }
-#shop .card .ds { display: none; }
 #shop .card .nm { font-size: 10.5px; min-height: 24px; }
+
+/* v2: merge progress, offer details */
+.pips { display: inline-flex; gap: 3px; align-items: center; }
+.pips i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.45); }
+.pips i.on { background: var(--gold); border-color: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.pips i.next { border-color: var(--gold); }
+.pips.full i.next { background: var(--gold); animation: hint 0.9s ease-in-out infinite; }
+.slot.same { border-color: var(--gold); box-shadow: 0 0 10px rgba(255, 209, 102, 0.7); }
+.starlines { display: flex; flex-direction: column; gap: 4px; }
+.starlines > div { display: grid; grid-template-columns: 46px 1fr; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 10px; font-size: 12px; line-height: 1.3; font-weight: 600; color: var(--muted); }
+.starlines > div.cur { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.starlines b { font-size: 11px; }
+.danger.over > i { animation: hint 0.8s ease-in-out infinite; background: #ff5a6e; }
