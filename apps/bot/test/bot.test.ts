@@ -263,6 +263,7 @@ describe('payments', () => {
       t('ru', 'pay.delayed'),
       t('ru', 'pay.thanksGeneric'),
     ]);
+    for (let i = 0; i < 50 && harness.shellter.payments.pending() > 0; i++) await new Promise((r) => setTimeout(r, 10));
     expect(harness.shellter.payments.pending()).toBe(0);
   });
 

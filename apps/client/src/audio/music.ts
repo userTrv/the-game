@@ -71,7 +71,7 @@ const MOODS: Record<Exclude<MusicMood, 'none'>, MoodDef> = {
   // Mysterious: D minor, hollow bells, creaking timbers.
   wreck: {
     root: 50, scale: AEOLIAN, prog: [0, 5, 0, 3], mel: PENTA_MINOR, step: 0.5, bars: 2, cut: 1100, pad: 0.9, add: 6,
-    dens: 0.16, fm: 2, fmI: 0.9, oct: 1, ring: 1.8, pulse: NONE, tick: NONE, drone: 0.2, water: 1.2, creak: 0.3,
+    dens: 0.16, fm: 2, fmI: 0.9, oct: 1, ring: 1.8, pulse: NONE, tick: NONE, drone: 0.16, water: 1.1, creak: 0.3,
     rev: 0.5, echo: 0.4,
   },
   // Deep and sparse: two slow A lydian chords, glassy bells with long echoes.
@@ -94,8 +94,8 @@ const MOODS: Record<Exclude<MusicMood, 'none'>, MoodDef> = {
   },
   // Darker: C phrygian, 3+3+2 heartbeat over a low drone.
   boss: {
-    root: 48, scale: PHRYGIAN, prog: [0, 1, 0, 6], mel: PENTA_MINOR, step: 0.27, bars: 2, cut: 950, pad: 0.9, add: 6,
-    dens: 0.2, fm: 2, fmI: 1.2, oct: 1, ring: 1.3, pulse: [1, 0, 0, 0.8, 0, 0, 0.7, 0], tick: NONE, drone: 0.5,
+    root: 48, scale: PHRYGIAN, prog: [0, 1, 0, 6], mel: PENTA_MINOR, step: 0.27, bars: 2, cut: 950, pad: 0.75, add: 6,
+    dens: 0.2, fm: 2, fmI: 1.2, oct: 1, ring: 1.3, pulse: [0.7, 0, 0, 0.55, 0, 0, 0.5, 0], tick: NONE, drone: 0.3,
     water: 0.7, creak: 0.12, rev: 0.45, echo: 0.3,
   },
 };

@@ -116,7 +116,7 @@ export function createAudioEngine(
         if (ctx.state !== 'running') {
           wakeAt = Date.now();
           await wait(ctx.resume());
-          if (ctx.state !== 'running') wakeAt = -Infinity;
+          if ((ctx.state as AudioContextState) !== 'running') wakeAt = -Infinity;
         }
       } catch {
         /* still locked; a later gesture may succeed */

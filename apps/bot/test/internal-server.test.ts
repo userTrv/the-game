@@ -78,7 +78,7 @@ describe('internal HTTP server', () => {
     const chargeId = paid.status === 'paid' ? paid.chargeId : '';
     expect(chargeId).not.toBe('');
 
-    const refund = (): ReturnType<FastifyInstance['inject']> =>
+    const refund = () =>
       app.inject({
         method: 'POST',
         url: '/internal/refund',
