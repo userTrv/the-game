@@ -812,11 +812,11 @@ export function applyRunAction(
 }
 
 /** State safe to send to the client: no seed, so offers cannot be predicted. */
-export type PublicRun = Omit<RunState, 'seed'> & { huntSeed: string };
+export type PublicRun = Omit<RunState, 'seed'> & { huntSeed: string; /** Number of the last applied action; the next request sends seq + 1. */ seq: number };
 
-export function publicRun(state: RunState): PublicRun {
+export function publicRun(state: RunState, seq = 0): PublicRun {
   const { seed, ...rest } = state;
-  return { ...rest, huntSeed: String(createRng(subSeed(seed, 'hunt', state.stage, state.huntNonce)).int(0, 2 ** 31 - 1)) };
+  return { ...rest, seq, huntSeed: String(createRng(subSeed(seed, 'hunt', state.stage, state.huntNonce)).int(0, 2 ** 31 - 1)) };
 }
 
 export const RUN_CHAPTER_STAGES = CHAPTER_STAGES;

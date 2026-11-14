@@ -1,4 +1,4 @@
-import { Art, arcPoints, blob, curve, darken, DIET, lighten, rnd, spikes, type Diet, type Sprite } from '../kit';
+import { Art, arcPoints, blob, curve, DIET, lighten, rnd, spikes, type Diet, type Sprite } from '../kit';
 
 /**
  * Pool fauna. A creature is coloured by its diet so the player reads "what gene is this" at a glance;

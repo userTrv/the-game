@@ -21,7 +21,7 @@ export async function activeRun(tx: Tx | Ctx['db'], playerId: string, slot = 0):
 
 export async function activePublicRun(tx: Tx | Ctx['db'], playerId: string): Promise<PublicRun | null> {
   const row = await activeRun(tx, playerId);
-  return row ? publicRun(row.state) : null;
+  return row ? publicRun(row.state, row.seq) : null;
 }
 
 export async function startNewRun(ctx: Ctx, playerId: string, heroId: string, slot: number) {
@@ -171,7 +171,7 @@ export async function runAction(ctx: Ctx, playerId: string, runId: string, seq: 
       if (battle.won && run.state.battle) await saveGhost(tx, now, row, run.state, run.state.battle.stage);
     }
 
-    const response: RunActionResponse = { run: state.phase === 'ended' ? null : publicRun(state), events: events.filter((e) => e.type !== 'clamped') };
+    const response: RunActionResponse = { run: state.phase === 'ended' ? null : publicRun(state, seq), events: events.filter((e) => e.type !== 'clamped') };
     let rewards: RunRow['rewards'] = null;
     if (state.phase === 'ended') {
       response.ended = await finishRun(tx, ctx, row, run, state);
