@@ -1,0 +1,20 @@
+packages:
+  - packages/*
+  - apps/*
+  - tools/*
+
+# Защита от атак через цепочку поставок.
+# Ставим только версии, опубликованные не меньше 7 дней назад (в минутах).
+minimumReleaseAge: 10080
+
+# Не ставить версию, у которой доверие ниже, чем у предыдущих.
+trustPolicy: no-downgrade
+
+# Транзитивные зависимости только из реестра: без git-репозиториев и tarball по URL.
+blockExoticSubdeps: true
+
+# Скрипты установки запрещены всем пакетам (esbuild работает и без postinstall).
+strictDepBuilds: true
+onlyBuiltDependencies: []
+ignoredBuiltDependencies:
+  - esbuild

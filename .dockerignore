@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.pglite
+**/test-results
+**/playwright-report
+.git
+.env*
+!.env.example
+*.pem
+*.key
+apps/client/public/assets/atlas
+apps/client/src/assets/generated
+tools/art/out

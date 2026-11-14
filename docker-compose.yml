@@ -1,0 +1,58 @@
+# Production layout on one host: Postgres + game server + bot. Nothing is published to the
+# internet directly: the server listens on 127.0.0.1:3000 for the reverse proxy (see deploy/Caddyfile.example).
+# If Telegram is not reachable from this host, run only `postgres` and `server` here and start the
+# bot elsewhere:  docker compose --profile bot up -d bot   (on the other host, with the same .env).
+name: shellter
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shellter
+      POSTGRES_DB: shellter
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U shellter -d shellter']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      target: server
+      args:
+        VITE_BOT_USERNAME: ${BOT_USERNAME:-}
+        VITE_ADSGRAM_BLOCK_ID: ${ADSGRAM_BLOCK_ID:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DEV_AUTH: 'false'
+    ports:
+      - '127.0.0.1:${SERVER_PORT:-3000}:3000'
+
+  bot:
+    profiles: [bot]
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Internal API for the game server (invoices, refunds). Keep it private: bind to localhost
+      # or a VPN address, never to a public interface.
+      - '${BOT_INTERNAL_BIND:-127.0.0.1}:8082:8082'
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
+
+volumes:
+  pgdata:
