@@ -1,10 +1,11 @@
 import { signal } from '@preact/signals';
 import {
   BAL, buildAbilities, buildFighter, computeMods, createRng, genesForTier, heroDef, sizeScale, spawnTable, stageInfo, xpForTier, xpNeed,
-  zeroDiets, type AbilityInst, type ActiveKind, type BuildSnapshot, type CreatureDef, type Diet, type DietMap, type Fighter, type HuntReport,
+  zeroDiets, type AbilityInst, type ActiveKind, type BuildSnapshot, type CreatureDef, type DietMap, type Fighter, type HuntReport,
   type Mods, type PublicRun, type Rng, type SpawnEntry,
 } from '@shellter/shared';
-import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
+import type { Sprite} from 'pixi.js';
+import { Container, Graphics, TilingSprite } from 'pixi.js';
 import { sprite, tex } from '../gfx/assets';
 import { CrabView } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';

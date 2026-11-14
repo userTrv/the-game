@@ -1,4 +1,5 @@
-import { Application, Container } from 'pixi.js';
+import type { Container } from 'pixi.js';
+import { Application } from 'pixi.js';
 
 /**
  * One Pixi application for the whole game. Scenes are containers scaled so that the screen is

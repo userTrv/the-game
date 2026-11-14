@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals';
 import { buildFighter, enemyFighter, stageInfo, type BattleEvent, type BiomeId, type BuildSnapshot, type Fighter, type PublicRun } from '@shellter/shared';
-import { Container, Graphics, Sprite } from 'pixi.js';
+import type { Sprite } from 'pixi.js';
+import { Container, Graphics } from 'pixi.js';
 import { sprite } from '../gfx/assets';
 import { CrabView, type CrabLook } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';

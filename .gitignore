@@ -18,3 +18,4 @@ apps/client/src/assets/generated/
 .pglite/
 *.tsbuildinfo
 tmp/
+secrets/

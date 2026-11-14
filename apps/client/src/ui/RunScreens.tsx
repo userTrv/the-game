@@ -2,7 +2,7 @@ import { useSignal } from '@preact/signals';
 import {
   BAL, CHAPTER_STAGES, DIETS, familyCounts, frontCount, guardianDef, mutationDef, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
   SET_THRESHOLDS, shellDef, slotCount, stageInfo, tenantDef, wouldMerge, xpNeed,
-  type Diet, type Enemy, type Offer, type PublicRun, type Star, type TenantInst,
+  type Diet, type Enemy, type Offer, type PublicRun, type TenantInst,
 } from '@shellter/shared';
 import type { JSX } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
