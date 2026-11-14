@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [preact()],
+  define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.1.0') },
   server: {
     port: 5173,
     host: true,
