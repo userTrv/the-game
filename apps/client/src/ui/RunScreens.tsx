@@ -333,7 +333,7 @@ export function CampView(): JSX.Element | null {
           <span class="chip tiny" title={t('camp.loot')}><Spr id="icon/coral" size={15} />{num(r.loot.coral)} <Spr id="icon/shine" size={15} />{num(r.loot.shine)}</span>
         </div>
       </div>
-      <div class="grow" style={{ minHeight: '120px' }} />
+      <div style={{ height: 'clamp(118px, 19vh, 190px)', flex: 'none' }} />
       {tut.value ? <div class="hint shadow-text" style={{ marginTop: 0, marginBottom: '6px', fontSize: '14px' }} id="camp-tut">{t(tut.value)}</div> : null}
       <div class="panel col" style={{ gap: '8px', padding: '10px' }}>
         <SetChips r={r} />
@@ -353,7 +353,7 @@ export function CampView(): JSX.Element | null {
         <GeneBars r={r} up={up} />
       </div>
       {camp && !waitingBattle ? (
-        <div class="scroll col" style={{ marginTop: '8px', maxHeight: '46%', paddingTop: '10px', gap: '10px' }}>
+        <div class="scroll col grow" style={{ marginTop: '6px', paddingTop: '10px', gap: '8px' }}>
           {!camp.offerTaken ? (
             <>
               <div class="row between">
@@ -378,9 +378,9 @@ export function CampView(): JSX.Element | null {
             {camp.shop.map((it, i) => <OfferCard offer={it.offer} r={r} price={it.price} sold={it.sold} key={`${i}-${camp.rerolls}`} id={`shop-${i}`} onPick={() => pick('buy', i, it.offer, it.price)} />)}
           </div>
         </div>
-      ) : null}
-      <div class="row" style={{ marginTop: '10px', gap: '8px' }}>
-        {!waitingBattle ? <Btn class="ghost" id="carry-btn" onClick={() => (confirmCarry.value = true)}>{t('camp.carry')}</Btn> : null}
+      ) : <div class="grow" />}
+      <div class="row" style={{ marginTop: '8px', gap: '8px' }}>
+        {!waitingBattle ? <Btn class="ghost sm" id="carry-btn" onClick={() => (confirmCarry.value = true)}>{t('camp.carry')}</Btn> : null}
         <Btn class="go grow" id="descend-btn" disabled={(!waitingBattle && (atMax || !camp?.offerTaken)) || busy.value} onClick={() => void go()}>
           <span class="col" style={{ gap: 0, alignItems: 'center' }}>
             <span>{waitingBattle ? t('camp.fight.again') : nextInfo?.kind === 'guardian' ? t('camp.fight') : t('camp.descend')} ▸</span>

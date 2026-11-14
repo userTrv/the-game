@@ -54,6 +54,8 @@ async function biomeAtlas(stage: number): Promise<void> {
 }
 
 export function startDirector(): void {
+  // Automated tests steer the crab through this hook.
+  (window as unknown as { __hunt?: () => HuntScene | null }).__hunt = hunt;
   effect(() => {
     const s = screen.value;
     const r = run.value;

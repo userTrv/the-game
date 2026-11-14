@@ -81,10 +81,10 @@ export const BAL = {
     dangerTime: 150,
     minLeaveTime: 12,
     hardMaxTime: 480,
-    initialSpawn: 16,
-    maxAlive: 26,
+    initialSpawn: 22,
+    maxAlive: 34,
     /** Creatures per second at danger 0 and 1. */
-    spawnRate: [0.55, 0.85] as readonly number[],
+    spawnRate: [0.8, 1.1] as readonly number[],
     creatureHpBase: 6,
     creatureHpPow: 1.6,
     creatureDmgBase: 4,

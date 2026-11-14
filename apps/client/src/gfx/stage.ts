@@ -15,6 +15,7 @@ export interface Scene {
 }
 
 let app: Application | null = null;
+let hostEl: HTMLElement | null = null;
 let current: Scene | null = null;
 let viewH = 844;
 let frames = 0;
@@ -32,8 +33,9 @@ export function pixi(): Application {
 
 function layout(): void {
   if (!app) return;
-  const w = app.renderer.width / app.renderer.resolution;
-  const h = app.renderer.height / app.renderer.resolution;
+  // CSS size of the host, not the renderer's: the renderer may still hold its pre-resize size.
+  const w = hostEl?.clientWidth || app.renderer.width / app.renderer.resolution;
+  const h = hostEl?.clientHeight || app.renderer.height / app.renderer.resolution;
   const k = w / VIEW_W;
   viewH = h / k;
   app.stage.scale.set(k);
@@ -41,6 +43,7 @@ function layout(): void {
 }
 
 export async function initStage(host: HTMLElement): Promise<void> {
+  hostEl = host;
   app = new Application();
   await app.init({
     resizeTo: host,
@@ -53,6 +56,10 @@ export async function initStage(host: HTMLElement): Promise<void> {
   });
   host.appendChild(app.canvas);
   app.renderer.on('resize', layout);
+  new ResizeObserver(() => {
+    app?.resize();
+    layout();
+  }).observe(host);
   layout();
   app.ticker.add((ticker) => {
     // Clamp long frames (tab switch, GC) so simulations never jump.

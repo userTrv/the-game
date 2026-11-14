@@ -36,29 +36,39 @@ function caustics(): Texture {
   c.height = size;
   const g = c.getContext('2d');
   if (g) {
-    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
     g.lineCap = 'round';
+    g.lineJoin = 'round';
+    // Soft edges where the browser supports canvas filters; crisp lines elsewhere are fine too.
+    try {
+      g.filter = 'blur(1.6px)';
+    } catch {
+      /* no filter support */
+    }
     let seed = 7;
     const rnd = (): number => {
       seed = (seed * 16807) % 2147483647;
       return seed / 2147483647;
     };
-    const pts: [number, number][] = [];
-    for (let i = 0; i < 26; i++) pts.push([rnd() * size, rnd() * size]);
-    for (const [x, y] of pts) {
-      const r = 18 + rnd() * 22;
-      // Draw each cell 9 times so it wraps across tile edges.
+    for (let i = 0; i < 20; i++) {
+      const x = rnd() * size;
+      const y = rnd() * size;
+      const r = 20 + rnd() * 24;
+      const ph = rnd() * 6;
+      const lw = 1.6 + rnd() * 2;
+      // Draw each wobbly cell 9 times so it wraps across tile edges.
       for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) {
-        g.lineWidth = 2 + rnd() * 2.5;
+        g.lineWidth = lw;
         g.beginPath();
-        for (let a = 0; a <= 6; a++) {
-          const ang = (a / 6) * Math.PI * 2;
-          const rr = r * (0.75 + 0.35 * Math.sin(ang * 3 + x));
+        for (let a = 0; a <= 24; a++) {
+          const ang = (a / 24) * Math.PI * 2;
+          const rr = r * (0.8 + 0.22 * Math.sin(ang * 3 + ph) + 0.1 * Math.sin(ang * 5 + ph * 2));
           const px = x + ox + Math.cos(ang) * rr;
-          const py = y + oy + Math.sin(ang) * rr * 0.8;
+          const py = y + oy + Math.sin(ang) * rr * 0.75;
           if (a === 0) g.moveTo(px, py);
           else g.lineTo(px, py);
         }
+        g.closePath();
         g.stroke();
       }
     }

@@ -15,6 +15,8 @@ import { audio, sfx } from '../sound';
 import { haptic, player } from '../state';
 
 const H = BAL.hunt;
+/** World zoom: the crab should read clearly on a phone held at arm's length. */
+const ZOOM = 1.3;
 
 export interface HuntHud {
   hp: number;
@@ -191,7 +193,7 @@ export class HuntScene implements Scene {
     this.ents.addChild(this.crab);
     this.crab.hidden = true;
     this.spawnNodes();
-    for (let i = 0; i < H.initialSpawn; i++) this.spawn(true, i < 11);
+    for (let i = 0; i < H.initialSpawn; i++) this.spawn(true, i < 15);
 
     this.canvas = pixi().canvas as HTMLCanvasElement;
     this.canvas.addEventListener('pointerdown', this.onDown);
@@ -234,16 +236,16 @@ export class HuntScene implements Scene {
     this.floor.addChild(g);
     const c = new TilingSprite({ texture: this.water.root.children[1] instanceof TilingSprite ? (this.water.root.children[1] as TilingSprite).texture : tex('fx/dot'), width: H.arenaW + 80, height: H.arenaH + 80 });
     c.position.set(-40, -40);
-    c.alpha = look.caustic * 1.2;
+    c.alpha = look.caustic * 0.75;
     c.blendMode = 'add';
     this.floor.addChild(c);
     this.caustic = c;
     const decor = { lagoon: ['rock_sand', 'rock_coral', 'seagrass', 'seagrass_tall', 'fan_coral'], wreck: ['rock_dark', 'plank', 'anchor', 'barrel', 'kelp_dark'], abyss: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'], trench: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'] }[this.info.biome];
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 16; i++) {
       const id = decor[rng.int(0, decor.length - 1)] as string;
-      const s = sprite(`decor/${id}`, 0.8 + rng.next() * 0.5);
+      const s = sprite(`decor/${id}`, 0.7 + rng.next() * 0.4);
       // Keep the middle of the arena open; decor frames the edges.
-      const edge = rng.chance(0.7);
+      const edge = rng.chance(0.8);
       const x = edge ? (rng.chance(0.5) ? rng.next() * 90 : H.arenaW - rng.next() * 90) : 60 + rng.next() * (H.arenaW - 120);
       const y = 40 + rng.next() * (H.arenaH - 60);
       s.position.set(x, y);
@@ -320,7 +322,7 @@ export class HuntScene implements Scene {
 
   private toWorld(e: PointerEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const k = rect.width / VIEW_W;
+    const k = (rect.width / VIEW_W) * ZOOM;
     return { x: (e.clientX - rect.left) / k + this.camX, y: (e.clientY - rect.top) / k + this.camY };
   }
   private onDown = (e: PointerEvent): void => {
@@ -604,9 +606,18 @@ export class HuntScene implements Scene {
     if (this.time >= H.minLeaveTime) this.finish(false);
   }
 
-  /** Test hook: finishes the pool with whatever was eaten so far. */
-  debugState(): { x: number; y: number; creatures: { x: number; y: number; edible: boolean }[] } {
-    return { x: this.cx, y: this.cy, creatures: this.creatures.filter((c) => c.hp > 0).map((c) => ({ x: c.x, y: c.y, edible: c.tier <= this.size })) };
+  /** Test hook: where things are on screen (client px), so an automated player can steer. */
+  debugState(): { crab: { x: number; y: number }; eaten: number; time: number; creatures: { x: number; y: number; edible: boolean }[]; nodes: { x: number; y: number }[] } {
+    const rect = this.canvas.getBoundingClientRect();
+    const k = (rect.width / VIEW_W) * ZOOM;
+    const sc = (x: number, y: number): { x: number; y: number } => ({ x: rect.left + (x - this.camX) * k, y: rect.top + (y - this.camY) * k });
+    return {
+      crab: sc(this.cx, this.cy - 14),
+      eaten: this.eatenCount,
+      time: this.time,
+      creatures: this.creatures.filter((c) => c.hp > 0).map((c) => ({ ...sc(c.x, c.y), edible: c.tier <= this.size })),
+      nodes: this.nodes.filter((n) => !n.done).map((n) => sc(n.x, n.y)),
+    };
   }
 
   private save(): void {
@@ -915,13 +926,14 @@ export class HuntScene implements Scene {
     this.crab.scale.set(cs * this.facing, cs);
     this.crab.update(dt);
 
-    const vh = viewHeight();
-    const tx = Math.max(-20, Math.min(H.arenaW + 20 - VIEW_W, this.cx - VIEW_W / 2));
+    const vh = viewHeight() / ZOOM;
+    const vw = VIEW_W / ZOOM;
+    const tx = Math.max(-20, Math.min(H.arenaW + 20 - vw, this.cx - vw / 2));
     const ty = Math.max(-20, Math.min(H.arenaH + 20 - vh, this.cy - vh * 0.52));
     this.camX += (tx - this.camX) * Math.min(1, dt * 6);
     this.camY += (ty - this.camY) * Math.min(1, dt * 6);
     const sh = this.fx.shake;
-    this.world.position.set(-this.camX + (Math.random() - 0.5) * sh, -this.camY + (Math.random() - 0.5) * sh);
+    this.world.position.set((-this.camX + (Math.random() - 0.5) * sh) * ZOOM, (-this.camY + (Math.random() - 0.5) * sh) * ZOOM);
     this.dark.alpha = BIOME_LOOK[this.info.biome].dark + danger * 0.3;
 
     if (this.hp <= 0) {
@@ -944,8 +956,9 @@ export class HuntScene implements Scene {
   resize(w: number, h: number): void {
     this.water.resize(w, h);
     this.dark.clear().rect(0, 0, w, h).fill({ color: 0x050826 });
-    this.camX = Math.max(-20, Math.min(H.arenaW + 20 - w, this.cx - w / 2));
-    this.camY = Math.max(-20, Math.min(H.arenaH + 20 - h, this.cy - h * 0.52));
+    this.world.scale.set(ZOOM);
+    this.camX = Math.max(-20, Math.min(H.arenaW + 20 - w / ZOOM, this.cx - w / ZOOM / 2));
+    this.camY = Math.max(-20, Math.min(H.arenaH + 20 - h / ZOOM, this.cy - (h / ZOOM) * 0.52));
   }
 
   destroy(): void {
