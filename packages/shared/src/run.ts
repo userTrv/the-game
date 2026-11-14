@@ -1,7 +1,6 @@
 import { simulateBattle, type BattleResult } from './battle';
 import { buildFighter, computeMods, familyCounts, guardianFighter, slotCount, type Fighter } from './build';
 import { BAL, feed, genesForTier, maxMealTier } from './data/balance';
-import { CREATURE_BY_ID } from './data/creatures';
 import { guardianDef } from './data/guardians';
 import { heroDef } from './data/heroes';
 import { mutationDef } from './data/mutations';
@@ -9,7 +8,7 @@ import { MAX_SHELL_TIER } from './data/shells';
 import { tenantDef } from './data/tenants';
 import { generateOffers, generateShellChoices, generateShop, registerMaxHp, tenantPrice, type Offer, type ShopItem } from './offers';
 import { createRng, subSeed } from './rng';
-import { CHAPTER_STAGES, creatureTier, spawnTable, stageInfo } from './stages';
+import { CHAPTER_STAGES, spawnTable, stageInfo } from './stages';
 import {
   DIETS,
   zeroDiets,

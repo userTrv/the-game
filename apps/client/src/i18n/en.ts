@@ -72,6 +72,7 @@ export const en: Record<string, string> = {
   'hunt.hint.node': 'Stand by the oyster',
   'hunt.hint.leave': 'Full? Tap “Onward”',
   'hunt.grow': 'Grew up!',
+  'hunt.m': 'm',
   'hunt.danger': 'It gets dark. Predators grow bold',
   'hunt.paused': 'Paused',
   'hunt.resume': 'Touch to continue',

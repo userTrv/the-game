@@ -1,16 +1,16 @@
 import { signal } from '@preact/signals';
 import {
-  BAL, buildAbilities, buildFighter, computeMods, createRng, genesForTier, heroDef, sizeScale, spawnTable, stageInfo, xpForTier, xpNeed,
+  BAL, buildAbilities, buildFighter, computeMods, createRng, feed, genesForTier, heroDef, sizeScale, spawnTable, stageInfo, xpNeed,
   zeroDiets, type AbilityInst, type ActiveKind, type BuildSnapshot, type CreatureDef, type DietMap, type Fighter, type HuntReport,
   type Mods, type PublicRun, type Rng, type SpawnEntry,
 } from '@shellter/shared';
 import type { Sprite} from 'pixi.js';
-import { Container, Graphics, TilingSprite } from 'pixi.js';
+import { Container, Graphics, Sprite as PixiSprite } from 'pixi.js';
 import { sprite, tex } from '../gfx/assets';
 import { CrabView } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';
 import { pixi, VIEW_W, viewHeight, type Scene } from '../gfx/stage';
-import { BIOME_LOOK, Water } from '../gfx/water';
+import { BIOME_LOOK, Deep, glowTexture } from '../gfx/deep';
 import { loadLocal, removeLocal, saveLocal } from '../platform/storage';
 import { audio, sfx } from '../sound';
 import { haptic, player } from '../state';
@@ -34,6 +34,9 @@ export interface HuntHud {
   hint: string | null;
   paused: boolean;
   eaten: number;
+  /** Distance from the entry point, metres. */
+  dist: number;
+  stalkers: number;
 }
 
 export const huntHud = signal<HuntHud | null>(null);
@@ -63,6 +66,19 @@ interface Creature {
   flash: number;
   ph: number;
   scale: number;
+  glow: Sprite;
+  /** Tier follows the crab: cannot be outgrown, bites even a hidden crab. */
+  stalker: boolean;
+  /** Guards a chest: stays near its nest. */
+  home: { x: number; y: number } | null;
+}
+
+/** A pearl dropped by a slain predator, waiting to be picked up. */
+interface Drop {
+  x: number;
+  y: number;
+  s: Sprite;
+  age: number;
 }
 
 interface Morsel {
@@ -74,22 +90,35 @@ interface Morsel {
   age: number;
 }
 
+type NodeKind = 'oyster' | 'coral' | 'glitter' | 'chest';
+
 interface NodeEnt {
-  kind: 'oyster' | 'coral' | 'glitter';
+  /** Stable id inside the world (`chunk:index`), so a collected node stays collected. */
+  key: string;
+  kind: NodeKind;
   x: number;
   y: number;
   s: Sprite;
+  glow: Sprite;
   progress: number;
   done: boolean;
-  respawn: number;
+}
+
+interface Chunk {
+  nodes: NodeEnt[];
+  decor: Sprite[];
 }
 
 interface Saved {
   runId: string;
   nonce: number;
   time: number;
-  eaten: Record<string, number>;
-  nodes: { oyster: number; coral: number; glitter: number };
+  log: [string, number][];
+  nodes: Record<NodeKind, number>;
+  drops: number;
+  taken: string[];
+  x: number;
+  y: number;
   hp: number;
   size: number;
   xp: number;
@@ -99,11 +128,22 @@ interface Saved {
 export class HuntScene implements Scene {
   readonly root = new Container();
   private world = new Container();
-  private floor = new Container();
+  private glows = new Container();
   private ents = new Container();
   private fx = new Fx();
   private dark = new Graphics();
-  private water: Water;
+  private deep: Deep;
+  private chunks = new Map<string, Chunk>();
+  private taken = new Set<string>();
+  private nested = new Set<string>();
+  private drops: Drop[] = [];
+  private dropCount = 0;
+  private log: [string, number][] = [];
+  private stalkerT = 0;
+  private maxTableTier = 1;
+  private heading = 0;
+  private crabGlow: Sprite;
+  private trailT = 0;
   private crab = new CrabView();
   private creatures: Creature[] = [];
   private morsels: Morsel[] = [];
@@ -115,8 +155,8 @@ export class HuntScene implements Scene {
   private mods: Mods;
   private abilities: AbilityInst[];
   private cds: number[] = [];
-  private cx = H.arenaW / 2;
-  private cy = H.arenaH / 2;
+  private cx = 0;
+  private cy = 0;
   private facing = 1;
   private target: { x: number; y: number } | null = null;
   private hidden = true;
@@ -129,9 +169,8 @@ export class HuntScene implements Scene {
   private atkT = 0;
   private combo = 0;
   private comboT = 0;
-  private eaten: Record<string, number> = {};
   private eatenCount = 0;
-  private nodeCount = { oyster: 0, coral: 0, glitter: 0 };
+  private nodeCount: Record<NodeKind, number> = { oyster: 0, coral: 0, glitter: 0, chest: 0 };
   private gained = zeroDiets();
   private pearls = 0;
   private coral = 0;
@@ -144,7 +183,6 @@ export class HuntScene implements Scene {
   private moved = 0;
   private sawBig = false;
   private hitStop = 0;
-  private glitterSpawned = false;
   private camX = 0;
   private camY = 0;
   private info;
@@ -161,6 +199,7 @@ export class HuntScene implements Scene {
     this.dangerTime = H.dangerTime * (this.tutorial ? 1.6 : 1);
     this.rng = createRng(`${run.huntSeed}/client`);
     this.table = spawnTable(run.stage, run.cfg.event?.dietWeights);
+    this.maxTableTier = Math.max(...this.table.map((e) => e.tier));
     this.size = run.size;
     this.xp = run.xp;
     this.hp = run.hp;
@@ -175,9 +214,14 @@ export class HuntScene implements Scene {
     const saved = loadLocal<Saved | null>('hunt', null);
     if (saved && saved.runId === run.id && saved.nonce === run.huntNonce) {
       this.time = saved.time;
-      this.eaten = saved.eaten;
-      this.eatenCount = Object.values(saved.eaten).reduce((a, b) => a + b, 0);
-      this.nodeCount = saved.nodes;
+      this.log = saved.log ?? [];
+      this.eatenCount = this.log.length;
+      this.nodeCount = { ...this.nodeCount, ...saved.nodes };
+      this.dropCount = saved.drops ?? 0;
+      this.taken = new Set(saved.taken ?? []);
+      this.pearls = this.nodeCount.oyster * H.oysterPearls + this.nodeCount.chest * H.chestPearls + this.dropCount;
+      this.cx = saved.x ?? 0;
+      this.cy = saved.y ?? 0;
       this.gained = saved.gained;
       this.size = saved.size;
       this.xp = saved.xp;
@@ -185,15 +229,15 @@ export class HuntScene implements Scene {
       this.hp = Math.min(this.fighter.maxHp, saved.hp);
     }
 
-    this.water = new Water(this.info.biome, 10);
-    this.buildFloor();
+    this.deep = new Deep(this.info.biome, 6);
     this.ents.sortableChildren = true;
-    this.world.addChild(this.floor, this.ents, this.fx.layer);
-    this.root.addChild(this.water.root, this.world, this.dark);
+    this.world.addChild(this.glows, this.ents, this.fx.layer);
+    this.root.addChild(this.deep.root, this.world, this.deep.front, this.dark);
+    this.crabGlow = this.makeGlow(BIOME_LOOK[this.info.biome].glow, 150, 0.22);
     this.crab.setLook(this.look());
     this.ents.addChild(this.crab);
     this.crab.hidden = true;
-    this.spawnNodes();
+    this.syncChunks();
     for (let i = 0; i < H.initialSpawn; i++) this.spawn(true, i < 15);
 
     this.canvas = pixi().canvas as HTMLCanvasElement;
@@ -226,56 +270,190 @@ export class HuntScene implements Scene {
 
   // --- Setup ---------------------------------------------------------------------------------------
 
-  private buildFloor(): void {
-    const look = BIOME_LOOK[this.info.biome];
-    const g = new Graphics();
-    g.roundRect(-40, -40, H.arenaW + 80, H.arenaH + 80, 60).fill({ color: look.floor });
-    const rng = createRng(`${this.run.huntSeed}/floor`);
-    for (let i = 0; i < 90; i++) {
-      g.ellipse(rng.next() * H.arenaW, rng.next() * H.arenaH, 6 + rng.next() * 22, 3 + rng.next() * 9).fill({ color: look.floor2, alpha: 0.5 });
-    }
-    this.floor.addChild(g);
-    const c = new TilingSprite({ texture: this.water.root.children[1] instanceof TilingSprite ? (this.water.root.children[1] as TilingSprite).texture : tex('fx/dot'), width: H.arenaW + 80, height: H.arenaH + 80 });
-    c.position.set(-40, -40);
-    c.alpha = look.caustic * 0.75;
-    c.blendMode = 'add';
-    this.floor.addChild(c);
-    this.caustic = c;
-    const decor = { lagoon: ['rock_sand', 'rock_coral', 'seagrass', 'seagrass_tall', 'fan_coral'], wreck: ['rock_dark', 'plank', 'anchor', 'barrel', 'kelp_dark'], abyss: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'], trench: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'] }[this.info.biome];
-    for (let i = 0; i < 16; i++) {
-      const id = decor[rng.int(0, decor.length - 1)] as string;
-      const s = sprite(`decor/${id}`, 0.7 + rng.next() * 0.4);
-      // Keep the middle of the arena open; decor frames the edges.
-      const edge = rng.chance(0.8);
-      const x = edge ? (rng.chance(0.5) ? rng.next() * 90 : H.arenaW - rng.next() * 90) : 60 + rng.next() * (H.arenaW - 120);
-      const y = 40 + rng.next() * (H.arenaH - 60);
-      s.position.set(x, y);
-      s.zIndex = y;
-      if (rng.chance(0.5)) s.scale.x *= -1;
-      if (this.info.biome === 'trench') s.tint = 0xc8a8ff;
-      this.ents.addChild(s);
-    }
+  private makeGlow(tint: number, size: number, alpha: number): Sprite {
+    const g = new PixiSprite(glowTexture());
+    g.anchor.set(0.5);
+    g.width = size;
+    g.height = size;
+    g.tint = tint;
+    g.alpha = alpha;
+    g.blendMode = 'add';
+    this.glows.addChild(g);
+    return g;
   }
-  private caustic: TilingSprite | null = null;
 
-  private spawnNodes(): void {
-    const rng = createRng(`${this.run.huntSeed}/nodes`);
-    const place = (kind: NodeEnt['kind']): void => {
-      const x = 70 + rng.next() * (H.arenaW - 140);
-      const y = 90 + rng.next() * (H.arenaH - 180);
-      const s = sprite(kind === 'oyster' ? 'node/oyster' : kind === 'coral' ? 'node/coral' : 'node/glitter', 0.9);
+  /** How rich and dangerous the water is here: 0 at the entry point, 1 at `richDistance`, capped at 2. */
+  private richAt(x: number, y: number): number {
+    return Math.min(2, Math.hypot(x, y) / H.richDistance);
+  }
+
+  private danger(): number {
+    return Math.min(H.dangerMax, this.time / this.dangerTime + this.richAt(this.cx, this.cy) * 0.4);
+  }
+
+  /**
+   * The world has no walls: it is generated chunk by chunk from the hunt seed, so the same place
+   * always looks the same, and whatever was collected stays collected.
+   */
+  private buildChunk(ix: number, iy: number): Chunk {
+    const key = `${ix},${iy}`;
+    const rng = createRng(`${this.run.huntSeed}/c/${key}`);
+    const size = H.chunk;
+    const ox = ix * size;
+    const oy = iy * size;
+    const rich = this.richAt(ox + size / 2, oy + size / 2);
+    const home = ix === 0 && iy === 0;
+    const chunk: Chunk = { nodes: [], decor: [] };
+    const tint = this.info.biome === 'trench' ? 0xc8a8ff : 0xffffff;
+    const decorIds = { lagoon: ['rock_sand', 'rock_coral', 'seagrass', 'seagrass_tall', 'fan_coral'], wreck: ['rock_dark', 'plank', 'anchor', 'barrel', 'kelp_dark'], abyss: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'], trench: ['rock_abyss', 'vent', 'crystal', 'bones', 'glow_weed'] }[this.info.biome];
+    const spot = (pad: number): { x: number; y: number } => ({ x: ox + pad + rng.next() * (size - pad * 2), y: oy + pad + rng.next() * (size - pad * 2) });
+    const decorCount = rng.int(2, 4);
+    for (let i = 0; i < decorCount; i++) {
+      const p = spot(30);
+      // The entry point stays clear.
+      if (Math.hypot(p.x, p.y) < 90) continue;
+      const s = sprite(`decor/${decorIds[rng.int(0, decorIds.length - 1)] as string}`, 0.7 + rng.next() * 0.5);
+      s.position.set(p.x, p.y);
+      s.zIndex = p.y;
+      s.alpha = 0.92;
+      s.tint = tint;
+      if (rng.chance(0.5)) s.scale.x *= -1;
+      this.ents.addChild(s);
+      chunk.decor.push(s);
+    }
+    let n = 0;
+    const node = (kind: NodeKind, x: number, y: number): void => {
+      const id = `${key}:${n++}`;
+      const taken = this.taken.has(id);
+      if (taken && kind !== 'oyster') return;
+      const s = sprite(taken ? 'node/oyster_open' : kind === 'chest' ? 'node/chest' : `node/${kind}`, 0.9);
       s.position.set(x, y);
       s.zIndex = y;
       this.ents.addChild(s);
-      this.nodes.push({ kind, x, y, s, progress: 0, done: false, respawn: 0 });
+      const glowTint = kind === 'oyster' ? 0xe8f4ff : kind === 'coral' ? 0xff8a7a : 0xffe066;
+      const glow = this.makeGlow(glowTint, kind === 'chest' ? 150 : 110, taken ? 0 : 0.3);
+      glow.position.set(x, y - 10);
+      chunk.nodes.push({ key: id, kind, x, y, s, glow, progress: 0, done: taken });
     };
-    for (let i = 0; i < H.oysters; i++) place('oyster');
-    for (let i = 0; i < H.corals; i++) place('coral');
+    // Scattered finds; richer water has more of them.
+    if (home || rng.chance(0.3 + rich * 0.2)) {
+      const p = home ? { x: 120 + rng.next() * 60, y: -100 - rng.next() * 60 } : spot(60);
+      node('oyster', p.x, p.y);
+    }
+    const corals = rng.int(0, 1) + (rng.chance(0.3 + rich * 0.25) ? 1 : 0);
+    for (let i = 0; i < corals; i++) {
+      const p = spot(50);
+      node('coral', p.x, p.y);
+    }
+    if (!home && rng.chance(0.05 + rich * 0.05)) {
+      const p = spot(80);
+      node('glitter', p.x, p.y);
+    }
+    // Places worth a detour: a pearl bank, or a nest whose owner guards a chest.
+    const poi = home ? 1 : rng.next();
+    if (poi < 0.07 + rich * 0.04) {
+      const c = spot(120);
+      const count = rng.int(2, 3);
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + rng.next();
+        node('oyster', c.x + Math.cos(a) * 46, c.y + Math.sin(a) * 34);
+      }
+    } else if (poi < 0.13 + rich * 0.07) {
+      const c = spot(130);
+      const id = `${key}:${n}`;
+      node('chest', c.x, c.y);
+      if (!this.taken.has(id) && !this.nested.has(key)) {
+        this.nested.add(key);
+        this.spawnGuard(c.x, c.y);
+      }
+    }
+    return chunk;
+  }
+
+  /** Keeps the chunks around the camera alive and drops the ones left far behind. */
+  private syncChunks(): void {
+    const size = H.chunk;
+    const vh = viewHeight() / ZOOM;
+    const vw = VIEW_W / ZOOM;
+    const pad = 160;
+    const x0 = Math.floor((this.cx - vw / 2 - pad) / size);
+    const x1 = Math.floor((this.cx + vw / 2 + pad) / size);
+    const y0 = Math.floor((this.cy - vh * 0.52 - pad) / size);
+    const y1 = Math.floor((this.cy + vh * 0.48 + pad) / size);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        const key = `${ix},${iy}`;
+        if (!this.chunks.has(key)) this.chunks.set(key, this.buildChunk(ix, iy));
+      }
+    }
+    for (const [key, chunk] of this.chunks) {
+      const [ix, iy] = key.split(',').map(Number) as [number, number];
+      if (ix >= x0 - 1 && ix <= x1 + 1 && iy >= y0 - 1 && iy <= y1 + 1) continue;
+      for (const s of chunk.decor) s.destroy();
+      for (const nd of chunk.nodes) {
+        nd.s.destroy();
+        nd.glow.destroy();
+      }
+      this.chunks.delete(key);
+    }
+    this.nodes = [];
+    for (const chunk of this.chunks.values()) for (const nd of chunk.nodes) this.nodes.push(nd);
+  }
+
+  /** Distance at which things appear and disappear: just outside the screen. */
+  private ringRadius(): number {
+    const vh = viewHeight() / ZOOM;
+    const vw = VIEW_W / ZOOM;
+    return Math.hypot(vw / 2, vh / 2) + 50;
+  }
+
+  private addCreature(def: CreatureDef, tier: number, x: number, y: number, opts: { stalker?: boolean; home?: { x: number; y: number } } = {}): Creature {
+    const stalker = opts.stalker === true;
+    const scale = (0.62 + def.rank * 0.17 + (this.info.loop > 0 ? 0.05 : 0)) * (stalker ? 1.25 : 1);
+    const root = new Container();
+    const body = sprite(`creature/${def.id}`, scale);
+    body.y = def.hover ? -16 * scale : 0;
+    const icon = sprite(`icon/diet_${def.diet}`, 0.42);
+    icon.y = body.y - 30 * scale;
+    root.addChild(body, icon);
+    this.ents.addChild(root);
+    const glow = this.makeGlow(stalker ? 0xff4a5a : DIET_TINT[def.diet] ?? 0xffffff, (70 + def.rank * 16) * (stalker ? 1.6 : 1), 0.3);
+    const hp = H.creatureHpBase * Math.pow(tier, H.creatureHpPow) * (stalker ? 1.3 : 1);
+    const c: Creature = {
+      def, tier, x, y, vx: 0, vy: 0, hp, maxHp: hp, r: 12 * scale, root, body, icon, dir: this.rng.next() * Math.PI * 2,
+      think: this.rng.next() * 2, biteT: 0, stunT: 0, slowT: 0, poison: 0, lureT: 0, pullT: 0, dash: 0, flash: 0, ph: this.rng.next() * 6, scale,
+      glow, stalker, home: opts.home ?? null,
+    };
+    this.creatures.push(c);
+    return c;
+  }
+
+  private predatorDef(): SpawnEntry {
+    const hunters = this.table.filter((e) => e.def.behavior === 'hunter');
+    const pool = hunters.length > 0 ? hunters : [...this.table].sort((a, b) => b.def.rank - a.def.rank).slice(0, 2);
+    return pool[this.rng.int(0, pool.length - 1)] as SpawnEntry;
+  }
+
+  /** A predator that sits on its nest and its chest. */
+  private spawnGuard(x: number, y: number): void {
+    const e = this.predatorDef();
+    this.addCreature(e.def, Math.max(e.tier, this.size + 1), x + 30, y + 10, { home: { x, y } });
+  }
+
+  /** A stalker comes for a crab that stays too long or grows too big: its tier follows the crab. */
+  private spawnStalker(): void {
+    const e = this.predatorDef();
+    const a = this.rng.next() * Math.PI * 2;
+    const r = this.ringRadius();
+    const tier = this.size + 1 + (this.danger() >= H.stalkerExtraTierAt ? 1 : 0);
+    const c = this.addCreature(e.def, tier, this.cx + Math.cos(a) * r, this.cy + Math.sin(a) * r, { stalker: true });
+    c.body.tint = 0xffb4b4;
+    sfx('stun', { volume: 0.35, pitch: 0.6 });
   }
 
   private spawn(initial: boolean, forceEdible = false): void {
     if (this.creatures.length >= H.maxAlive) return;
-    const danger = Math.min(1, this.time / this.dangerTime);
+    const danger = Math.min(1.5, this.danger());
     const ws = this.table.map((e) => {
       const gap = e.tier - this.size;
       if (gap <= 0) return e.weight * (gap < -3 ? 0.35 : 1);
@@ -285,38 +463,12 @@ export class HuntScene implements Scene {
     });
     if (!ws.some((w) => w > 0)) ws.fill(1);
     const entry = this.table[this.rng.weightedIndex(ws)] as SpawnEntry;
-    let x = 0;
-    let y = 0;
-    for (let tries = 0; tries < 12; tries++) {
-      x = 30 + this.rng.next() * (H.arenaW - 60);
-      y = 30 + this.rng.next() * (H.arenaH - 60);
-      if (!initial) {
-        // Enter from an edge.
-        const side = this.rng.int(0, 3);
-        if (side === 0) x = 10;
-        else if (side === 1) x = H.arenaW - 10;
-        else if (side === 2) y = 10;
-        else y = H.arenaH - 10;
-      }
-      if (Math.hypot(x - this.cx, y - this.cy) > (initial ? 110 : 240)) break;
-    }
-    const def = entry.def;
-    const scale = 0.62 + def.rank * 0.17 + (this.info.loop > 0 ? 0.05 : 0);
-    const root = new Container();
-    const shadow = sprite('fx/shadow', 0.5 * scale);
-    shadow.alpha = 0.5;
-    const body = sprite(`creature/${def.id}`, scale);
-    body.y = def.hover ? -16 * scale : 0;
-    if (this.info.biome === 'trench') body.tint = 0xd8c0ff;
-    const icon = sprite(`icon/diet_${def.diet}`, 0.42);
-    icon.y = body.y - 30 * scale;
-    root.addChild(shadow, body, icon);
-    this.ents.addChild(root);
-    const hp = H.creatureHpBase * Math.pow(entry.tier, H.creatureHpPow);
-    this.creatures.push({
-      def, tier: entry.tier, x, y, vx: 0, vy: 0, hp, maxHp: hp, r: 12 * scale, root, body, icon, dir: this.rng.next() * Math.PI * 2,
-      think: this.rng.next() * 2, biteT: 0, stunT: 0, slowT: 0, poison: 0, lureT: 0, pullT: 0, dash: 0, flash: 0, ph: this.rng.next() * 6, scale,
-    });
+    const ring = this.ringRadius();
+    let a = this.rng.next() * Math.PI * 2;
+    // Fresh fauna mostly shows up ahead of a moving crab, so the water never feels empty.
+    if (!initial && this.target && this.rng.chance(0.65)) a = this.heading + (this.rng.next() - 0.5) * 2.4;
+    const r = initial ? 110 + this.rng.next() * (ring - 110) : ring + this.rng.next() * 60;
+    this.addCreature(entry.def, entry.tier, this.cx + Math.cos(a) * r, this.cy + Math.sin(a) * r * (initial ? 1.3 : 1));
   }
 
   // --- Input ---------------------------------------------------------------------------------------
@@ -365,9 +517,12 @@ export class HuntScene implements Scene {
   }
 
   private eat(def: CreatureDef, tier: number, x: number, y: number): void {
-    this.eaten[def.id] = (this.eaten[def.id] ?? 0) + 1;
+    this.log.push([def.id, tier]);
     this.eatenCount += 1;
-    this.xp += xpForTier(tier) * (1 + this.mods.xpPct / 100);
+    const g = { size: this.size, xp: this.xp };
+    const grew = feed(g, tier, this.mods.xpPct);
+    this.size = g.size;
+    this.xp = g.xp;
     this.gained[def.diet] += genesForTier(tier) * heroDef(this.run.cfg.heroId).geneMult * (1 + this.mods.genePct / 100);
     this.coral += H.coralPerTier * tier;
     this.combo = this.comboT > 0 ? Math.min(12, this.combo + 1) : 0;
@@ -379,12 +534,6 @@ export class HuntScene implements Scene {
     this.crab.snap();
     sfx(tier >= this.size ? 'eat_big' : 'eat_small', { pitch: 1 + this.combo * 0.05 });
     haptic('light');
-    let grew = false;
-    while (this.xp >= xpNeed(this.size)) {
-      this.xp -= xpNeed(this.size);
-      this.size += 1;
-      grew = true;
-    }
     if (grew) {
       const before = this.fighter.maxHp;
       this.rebuild();
@@ -411,6 +560,14 @@ export class HuntScene implements Scene {
       s.zIndex = c.y;
       this.ents.addChild(s);
       this.morsels.push({ def: c.def, tier: c.tier, x: c.x, y: c.y, s, age: 0 });
+      // Predators carry pearls: a stalker always drops one, other big fauna sometimes.
+      if (c.tier > this.size && (c.stalker || this.rng.chance(H.predatorPearlChance))) {
+        const ps = sprite('icon/pearl', 0.7);
+        ps.position.set(c.x + 14, c.y - 6);
+        ps.zIndex = c.y;
+        this.ents.addChild(ps);
+        this.drops.push({ x: c.x + 14, y: c.y - 6, s: ps, age: 0 });
+      }
       this.fx.emit('fx/dot', c.x, c.y - 8, { n: 10, tint: DIET_TINT[c.def.diet] ?? 0xffffff, speed: 110, size: 14, life: 0.5, add: true });
       this.fx.addShake(2);
       sfx('enemy_hit');
@@ -560,6 +717,8 @@ export class HuntScene implements Scene {
   private takeBite(c: Creature): void {
     c.biteT = H.biteInterval;
     let dmg = H.creatureDmgBase * Math.pow(c.tier, H.creatureDmgPow) * (100 / (100 + this.fighter.armor));
+    // A stalker pries at a closed shell too, though the shell takes most of it.
+    if (this.hidden) dmg *= 0.3;
     if (this.fighter.dodge > 0 && Math.random() < this.fighter.dodge) {
       this.fx.text(this.cx, this.cy - 40, '✦', 0xc6fff4, 14);
       return;
@@ -593,8 +752,9 @@ export class HuntScene implements Scene {
     this.target = null;
     removeLocal('hunt');
     const report: HuntReport = {
-      eaten: this.eaten,
+      log: this.log,
       nodes: this.nodeCount,
+      drops: this.dropCount,
       durationS: Math.round(this.time * 10) / 10,
       hpLost: Math.round((this.run.hp + (this.fighter.maxHp - this.maxHpStart) - Math.max(0, this.hp)) * 100) / 100,
       ko,
@@ -623,7 +783,10 @@ export class HuntScene implements Scene {
 
   private save(): void {
     if (this.finished) return;
-    const s: Saved = { runId: this.run.id, nonce: this.run.huntNonce, time: this.time, eaten: this.eaten, nodes: this.nodeCount, hp: this.hp, size: this.size, xp: this.xp, gained: this.gained };
+    const s: Saved = {
+      runId: this.run.id, nonce: this.run.huntNonce, time: this.time, log: this.log, nodes: this.nodeCount, drops: this.dropCount,
+      taken: [...this.taken], x: this.cx, y: this.cy, hp: this.hp, size: this.size, xp: this.xp, gained: this.gained,
+    };
     saveLocal('hunt', s);
   }
 
@@ -640,14 +803,15 @@ export class HuntScene implements Scene {
   private pushHud(): void {
     huntHud.value = {
       hp: Math.max(0, this.hp), maxHp: this.fighter.maxHp, shield: this.shield, size: this.size, xp: this.xp / xpNeed(this.size),
-      danger: Math.min(1, this.time / this.dangerTime), time: this.time, canLeave: this.time >= H.minLeaveTime && !this.finished,
+      danger: this.danger(), time: this.time, canLeave: this.time >= H.minLeaveTime && !this.finished,
       gained: { ...this.gained }, pearls: this.pearls, coral: Math.floor(this.coral), hint: this.hint(), paused: this.paused, eaten: this.eatenCount,
+      dist: Math.round(Math.hypot(this.cx, this.cy) / 40), stalkers: this.creatures.filter((c) => c.stalker && c.hp > 0).length,
     };
   }
 
   update(dtRaw: number): void {
-    this.water.update(dtRaw);
-    if (this.caustic) this.caustic.tilePosition.set(this.water ? performance.now() * 0.008 : 0, performance.now() * 0.005);
+    this.deep.setCamera(this.camX * ZOOM, this.camY * ZOOM);
+    this.deep.update(dtRaw);
     this.fx.update(dtRaw);
     if (this.paused || this.finished) {
       this.crab.hidden = true;
@@ -662,7 +826,8 @@ export class HuntScene implements Scene {
     const f = this.fighter;
     this.time += dt;
     this.comboT -= dt;
-    const danger = Math.min(1, this.time / this.dangerTime);
+    const dangerRaw = this.danger();
+    const danger = Math.min(1, dangerRaw);
     audio.setIntensity(danger);
 
     // Crab movement: follow the finger.
@@ -679,20 +844,20 @@ export class HuntScene implements Scene {
         this.moved += v;
         moving = true;
         if (Math.abs(dx) > 6) this.facing = dx > 0 ? 1 : -1;
+        this.heading = Math.atan2(dy, dx);
       }
       this.idleT = 0;
     } else {
       this.idleT += dt;
       if (this.idleT > 14) this.setPaused(true);
     }
-    // A gentle current pushes downwards as danger grows.
-    if (!this.hidden) this.cy += danger * 10 * dt;
-    this.cx = Math.max(24, Math.min(H.arenaW - 24, this.cx));
-    this.cy = Math.max(40, Math.min(H.arenaH - 20, this.cy));
+    this.syncChunks();
 
     const cs = this.crabScale();
     const crabR = 15 * cs;
     const reach = this.eatReach();
+    const despawn = this.ringRadius() + 320;
+    const magnet = H.magnetRadius * (1 + this.mods.magnetPct / 100);
 
     // Regeneration and trample.
     if (f.regen > 0 && this.hp < f.maxHp) this.hp = Math.min(f.maxHp, this.hp + f.regen * dt * 0.5);
@@ -729,6 +894,7 @@ export class HuntScene implements Scene {
       if (c.hp <= 0) {
         this.ents.removeChild(c.root);
         c.root.destroy({ children: true });
+        c.glow.destroy();
         this.creatures[i] = this.creatures[this.creatures.length - 1] as Creature;
         this.creatures.pop();
         continue;
@@ -767,7 +933,21 @@ export class HuntScene implements Scene {
         ax = dx / dist;
         ay = dy / dist;
         sp = Math.max(sp, 46);
-      } else if (!edible && !this.hidden && (c.def.behavior === 'hunter' || (c.def.behavior === 'ambush' && (dist < 120 || c.dash > 0))) && dist < 190 + danger * 80) {
+      } else if (c.stalker && !edible) {
+        // Stalkers never lose the trail, shell or no shell.
+        ax = dx / dist;
+        ay = dy / dist;
+        sp = Math.max(sp, 58) * (this.hidden ? 0.7 : 1.15);
+        if (!this.sawBig && dist < 160) this.sawBig = true;
+      } else if (c.home && !edible && (this.hidden || dist > 170)) {
+        // A nest guard drifts back to its chest when nobody bothers it.
+        const hx = c.home.x - c.x;
+        const hy = c.home.y - c.y;
+        const hd = Math.hypot(hx, hy) || 1;
+        ax = hx / hd;
+        ay = hy / hd;
+        sp = hd > 40 ? sp * 0.6 : 0;
+      } else if (!edible && !this.hidden && (c.home !== null || c.def.behavior === 'hunter' || (c.def.behavior === 'ambush' && (dist < 120 || c.dash > 0))) && dist < 190 + danger * 80) {
         // Predators chase a crab that is out of its shell.
         ax = dx / dist;
         ay = dy / dist;
@@ -798,11 +978,12 @@ export class HuntScene implements Scene {
         ay = Math.sin(c.dir);
       }
       c.x += ax * sp * dt;
-      c.y += ay * sp * dt + danger * 6 * dt;
-      if (c.x < 16 || c.x > H.arenaW - 16) c.dir = Math.PI - c.dir;
-      if (c.y < 20 || c.y > H.arenaH - 12) c.dir = -c.dir;
-      c.x = Math.max(12, Math.min(H.arenaW - 12, c.x));
-      c.y = Math.max(16, Math.min(H.arenaH - 8, c.y));
+      c.y += ay * sp * dt;
+      // Fauna left far behind is gone for good; stalkers and nest guards stay.
+      if (dist > despawn && !c.stalker && !c.home) {
+        c.hp = 0;
+        continue;
+      }
 
       // Contact.
       if (dist < crabR + c.r) {
@@ -814,7 +995,7 @@ export class HuntScene implements Scene {
             continue;
           }
           if (!edible && c.biteT <= 0 && c.stunT <= 0) this.takeBite(c);
-        }
+        } else if (c.stalker && !edible && c.biteT <= 0 && c.stunT <= 0) this.takeBite(c);
       }
 
       // Visuals.
@@ -825,7 +1006,11 @@ export class HuntScene implements Scene {
       const face = Math.abs(ax) > 0.15 ? (ax > 0 ? 1 : -1) : Math.sign(c.body.scale.x) || 1;
       const wob = 1 + Math.sin(this.time * 6 + c.ph) * 0.04;
       c.body.scale.set((face * c.scale * wob) / 2, (c.scale / wob) / 2);
-      c.body.tint = c.flash > 0 ? 0xffb0b0 : this.info.biome === 'trench' ? 0xd8c0ff : 0xffffff;
+      c.body.tint = c.flash > 0 ? 0xff8080 : c.stalker ? 0xffb4b4 : this.info.biome === 'trench' ? 0xd8c0ff : 0xffffff;
+      c.glow.position.set(c.x, c.y + c.body.y * 0.5);
+      c.glow.alpha = c.stalker || (!edible && c.home) ? 0.34 + 0.2 * Math.sin(this.time * 7 + c.ph) : edible ? 0.26 + 0.08 * Math.sin(this.time * 2 + c.ph) : 0.12;
+      if (!edible && !c.stalker) c.glow.tint = 0xff6a5a;
+      else if (!c.stalker) c.glow.tint = DIET_TINT[c.def.diet] ?? 0xffffff;
       c.body.rotation = c.stunT > 0 ? Math.sin(this.time * 20) * 0.15 : 0;
       c.icon.y = c.body.y - 30 * c.scale;
       c.icon.visible = edible;
@@ -833,7 +1018,6 @@ export class HuntScene implements Scene {
     }
 
     // Morsels drift to the crab and get eaten.
-    const magnet = H.magnetRadius * (1 + this.mods.magnetPct / 100);
     for (let i = this.morsels.length - 1; i >= 0; i--) {
       const m = this.morsels[i] as Morsel;
       m.age += dt;
@@ -855,40 +1039,68 @@ export class HuntScene implements Scene {
       }
     }
 
-    // Resource nodes: stand next to one and it opens by itself.
-    for (const n of this.nodes) {
-      if (n.done) {
-        n.respawn -= dt;
-        if (n.respawn <= 0 && n.kind !== 'glitter') {
-          n.done = false;
-          n.progress = 0;
-          n.s.texture = tex(n.kind === 'oyster' ? 'node/oyster' : 'node/coral');
-          n.s.alpha = 1;
-        }
-        continue;
+    // Pearls dropped by slain predators.
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i] as Drop;
+      d.age += dt;
+      const dx = this.cx - d.x;
+      const dy = this.cy - 10 - d.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (!this.hidden && dist < magnet) {
+        const v = (240 + (magnet - dist) * 3) * dt;
+        d.x += (dx / dist) * v;
+        d.y += (dy / dist) * v;
       }
+      d.s.position.set(d.x, d.y + Math.sin(d.age * 4) * 3);
+      d.s.zIndex = d.y;
+      if (!this.hidden && dist < crabR + 8) {
+        this.dropCount += 1;
+        this.pearls += 1;
+        this.fx.text(d.x, d.y - 26, '+1', 0xfdf7ff, 18);
+        this.fx.emit('fx/spark', d.x, d.y, { n: 8, tint: 0xfdf7ff, speed: 90, size: 11, life: 0.5, add: true });
+        sfx('collect_pearl');
+        haptic('medium');
+        d.s.destroy();
+        this.drops.splice(i, 1);
+      } else if (d.age > 40) {
+        d.s.destroy();
+        this.drops.splice(i, 1);
+      }
+    }
+
+    // Finds: stand next to one and it opens by itself. Nothing ever grows back.
+    for (const n of this.nodes) {
+      if (n.done) continue;
       const d = Math.hypot(n.x - this.cx, n.y - this.cy);
       const near = !this.hidden && d < 46 * cs + 10;
       n.progress = near ? n.progress + dt : Math.max(0, n.progress - dt * 2);
       n.s.rotation = near ? Math.sin(this.time * 30) * 0.06 : 0;
-      const need = n.kind === 'glitter' ? 0.2 : 0.9;
+      n.glow.alpha = 0.24 + 0.1 * Math.sin(this.time * 2.2 + n.x);
+      const need = n.kind === 'glitter' ? 0.2 : n.kind === 'chest' ? 1.6 : 0.9;
       if (n.progress >= need) {
         n.done = true;
-        n.respawn = H.nodeRespawnTime;
+        n.glow.alpha = 0;
+        this.taken.add(n.key);
         this.nodeCount[n.kind] += 1;
         const tint = n.kind === 'oyster' ? 0xfdf7ff : n.kind === 'coral' ? 0xff8a7a : 0xffe066;
-        this.fx.emit(n.kind === 'coral' ? 'fx/dot' : 'fx/spark', n.x, n.y - 16, { n: 12, tint, speed: 120, size: 13, life: 0.7, add: true, up: 40, gravity: 160 });
+        this.fx.emit(n.kind === 'coral' ? 'fx/dot' : 'fx/spark', n.x, n.y - 16, { n: n.kind === 'chest' ? 22 : 12, tint, speed: 120, size: 13, life: 0.7, add: true, up: 40, gravity: 160 });
         this.fx.ring(n.x, n.y - 12, 40, tint, 0.45);
         if (n.kind === 'oyster') {
           n.s.texture = tex('node/oyster_open');
-          this.pearls += 1;
-          this.fx.text(n.x, n.y - 40, '+1', 0xfdf7ff, 18);
+          this.pearls += H.oysterPearls;
+          this.fx.text(n.x, n.y - 40, `+${H.oysterPearls}`, 0xfdf7ff, 18);
           sfx('collect_pearl');
         } else if (n.kind === 'coral') {
-          n.s.alpha = 0.35;
+          n.s.alpha = 0.3;
           this.coral += 4;
           this.fx.text(n.x, n.y - 44, '+4', 0xffb0a0, 16);
           sfx('collect_coral');
+        } else if (n.kind === 'chest') {
+          n.s.alpha = 0.3;
+          this.pearls += H.chestPearls;
+          this.coral += H.chestCoral;
+          this.fx.text(n.x, n.y - 46, `+${H.chestPearls}`, 0xfdf7ff, 22);
+          sfx('reward');
         } else {
           n.s.visible = false;
           this.fx.text(n.x, n.y - 40, '✦', 0xffe066, 22);
@@ -897,27 +1109,35 @@ export class HuntScene implements Scene {
         haptic('medium');
       }
     }
-    // Staying longer pays: a glitter appears once the pool gets dangerous.
-    if (!this.glitterSpawned && this.time > 55) {
-      this.glitterSpawned = true;
-      if (createRng(`${this.run.huntSeed}/glitter`).chance(H.glitterChance)) {
-        const x = 80 + this.rng.next() * (H.arenaW - 160);
-        const y = 120 + this.rng.next() * (H.arenaH - 240);
-        const s = sprite('node/glitter', 0.9);
-        s.position.set(x, y);
-        s.zIndex = y;
-        this.ents.addChild(s);
-        this.nodes.push({ kind: 'glitter', x, y, s, progress: 0, done: false, respawn: 0 });
-      }
-    }
 
     // Spawning.
-    const rate = (H.spawnRate[0] as number) + ((H.spawnRate[1] as number) - (H.spawnRate[0] as number)) * danger;
+    const rate = ((H.spawnRate[0] as number) + ((H.spawnRate[1] as number) - (H.spawnRate[0] as number)) * danger) * (moving ? 1.3 : 1);
     this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
       this.spawn(false);
     }
+
+    // Stalkers: they come sooner for a crab that has outgrown the pool, and never stop coming.
+    const pressure = Math.max(dangerRaw, this.size >= this.maxTableTier ? 1 : 0);
+    const stalkersAlive = this.creatures.reduce((nAlive, c) => nAlive + (c.stalker && c.hp > 0 ? 1 : 0), 0);
+    if (pressure >= H.stalkerFrom && !(this.tutorial && this.time < 60)) {
+      this.stalkerT -= dt;
+      if (this.stalkerT <= 0 && stalkersAlive < H.stalkerMaxAlive) {
+        const k = Math.min(1, (pressure - H.stalkerFrom) / 1.4);
+        this.stalkerT = (H.stalkerInterval[0] as number) + ((H.stalkerInterval[1] as number) - (H.stalkerInterval[0] as number)) * k;
+        this.spawnStalker();
+      }
+    }
+
+    // A faint trail of light behind a moving crab.
+    this.trailT -= dt;
+    if (moving && this.trailT <= 0) {
+      this.trailT = 0.07;
+      this.fx.emit('fx/dot', this.cx - this.facing * 10, this.cy - 4, { n: 1, tint: BIOME_LOOK[this.info.biome].glow, speed: 8, size: 7, life: 0.9, add: true });
+    }
+    this.crabGlow.position.set(this.cx, this.cy - 12);
+    this.crabGlow.alpha = this.hidden ? 0.1 : 0.22;
 
     // Crab view and camera.
     this.crab.hidden = this.hidden;
@@ -929,8 +1149,8 @@ export class HuntScene implements Scene {
 
     const vh = viewHeight() / ZOOM;
     const vw = VIEW_W / ZOOM;
-    const tx = Math.max(-20, Math.min(H.arenaW + 20 - vw, this.cx - vw / 2));
-    const ty = Math.max(-20, Math.min(H.arenaH + 20 - vh, this.cy - vh * 0.52));
+    const tx = this.cx - vw / 2;
+    const ty = this.cy - vh * 0.52;
     this.camX += (tx - this.camX) * Math.min(1, dt * 6);
     this.camY += (ty - this.camY) * Math.min(1, dt * 6);
     const sh = this.fx.shake;
@@ -955,11 +1175,12 @@ export class HuntScene implements Scene {
   }
 
   resize(w: number, h: number): void {
-    this.water.resize(w, h);
-    this.dark.clear().rect(0, 0, w, h).fill({ color: 0x050826 });
+    this.deep.resize(w, h);
+    this.dark.clear().rect(0, 0, w, h).fill({ color: 0x02040f });
     this.world.scale.set(ZOOM);
-    this.camX = Math.max(-20, Math.min(H.arenaW + 20 - w / ZOOM, this.cx - w / ZOOM / 2));
-    this.camY = Math.max(-20, Math.min(H.arenaH + 20 - h / ZOOM, this.cy - (h / ZOOM) * 0.52));
+    this.camX = this.cx - w / ZOOM / 2;
+    this.camY = this.cy - (h / ZOOM) * 0.52;
+    this.syncChunks();
   }
 
   destroy(): void {

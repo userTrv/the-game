@@ -72,6 +72,7 @@ export const ru: Record<string, string> = {
   'hunt.hint.node': 'Постой у жемчужницы',
   'hunt.hint.leave': 'Наелся? Жми «Дальше»',
   'hunt.grow': 'Подрос!',
+  'hunt.m': 'м',
   'hunt.danger': 'Темнеет. Хищники смелеют',
   'hunt.paused': 'Пауза',
   'hunt.resume': 'Коснись, чтобы продолжить',

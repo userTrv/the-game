@@ -21,6 +21,22 @@ function oyster(open: boolean): Sprite {
   return a.done(open ? 'node/oyster_open' : 'node/oyster', { ax: 0.5, ay: 0.88 });
 }
 
+/** A giant clam grown over a nest: several pearls at once, and someone usually guards it. */
+function chest(): Sprite {
+  const a = new Art(76, 60, 2.4);
+  const c = '#8f7fc8';
+  a.glow(38, 34, 34, '#fff3c4', 0.5);
+  a.path(blob([[6, 30], [12, 10], [38, 2], [64, 10], [70, 30], [38, 24]]), c);
+  for (const x of [16, 24, 31, 38, 45, 52, 60]) a.line(curve([[38, 24], [(38 + x) / 2, 13], [x, 7 + Math.abs(x - 38) * 0.25]]), darken(c, 0.3), 1.8, { outline: false, opacity: 0.5 });
+  a.path(blob([[6, 38], [38, 30], [70, 38], [64, 52], [38, 58], [12, 52]]), '#ffe9f4');
+  for (const [x, y, r] of [[26, 41, 6], [40, 39, 7.5], [53, 42, 5.5]] as const) {
+    a.glow(x, y, r * 2.2, '#ffffff', 0.8);
+    a.circle(x, y, r, PAL.pearl);
+    a.hi(x - r * 0.3, y - r * 0.35, r * 0.35, r * 0.2);
+  }
+  return a.done('node/chest', { ax: 0.5, ay: 0.9 });
+}
+
 function coralNode(): Sprite {
   const a = new Art(52, 50, 2.2);
   const c = PAL.coral;
@@ -524,7 +540,7 @@ function logo(): Sprite {
 export function miscSprites(): { core: Sprite[]; decor: Record<'lagoon' | 'wreck' | 'abyss', Sprite[]>; big: Sprite[]; town: Sprite[] } {
   const diets = Object.keys(DIET) as Diet[];
   return {
-    core: [oyster(false), oyster(true), coralNode(), glitter(), ...diets.map(morsel), ...iconSprites(), ...fxSprites(), logo()],
+    core: [oyster(false), oyster(true), chest(), coralNode(), glitter(), ...diets.map(morsel), ...iconSprites(), ...fxSprites(), logo()],
     decor: decorSprites(),
     big: guardianSprites(),
     town: buildingSprites(),

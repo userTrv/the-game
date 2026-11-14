@@ -46,7 +46,8 @@ export function HuntHudView(): JSX.Element | null {
             <button class="icon-btn" aria-label={t('settings.title')} onClick={() => { hunt()?.setPaused(true); panel.value = 'settings'; }}>⚙</button>
           </div>
           <span class="chip tiny">{t('hunt.stage', { n: r.stage })} · {t(`biome.${info.biome}`)}</span>
-          <div class="danger" style={{ width: '120px' }} title={t('hunt.danger')}><i style={{ width: `${h.danger * 100}%` }} /></div>
+          <div class={`danger ${h.danger >= 1 ? 'over' : ''}`} style={{ width: '120px' }} title={t('hunt.danger')}><i style={{ width: `${Math.min(1, h.danger) * 100}%` }} /></div>
+          {h.dist >= 5 ? <span class="chip tiny" id="hunt-dist">{h.dist} {t('hunt.m')}</span> : null}
         </div>
       </div>
       {h.hint ? <div class="hint shadow-text" id="hunt-hint">{t(h.hint)}</div> : h.danger > 0.66 && h.time % 12 < 4 ? <div class="hint shadow-text">{t('hunt.danger')}</div> : null}
