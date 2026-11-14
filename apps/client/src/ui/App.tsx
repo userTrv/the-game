@@ -3,11 +3,13 @@ import { useEffect } from 'preact/hooks';
 import { hunt } from '../director';
 import { t } from '../i18n';
 import { setBackButton } from '../platform/telegram';
-import { bootError, busy, loadProgress, panel, screen, toast } from '../state';
+import { bootError, busy, landing, loadProgress, panel, screen, toast } from '../state';
 import { AlmanacSheet, BuildingSheet, HeroesSheet, HomeView, TalentsSheet } from './Home';
 import { Bar, Btn, Spr } from './kit';
 import { EventsSheet, InboxSheet, QuestsSheet, SettingsSheet, ShopSheet } from './Panels';
 import { BattleView, CampView, DownView, HuntHudView, ResultView } from './RunScreens';
+
+const BOT = import.meta.env.VITE_BOT_USERNAME as string | undefined;
 
 function Boot(): JSX.Element {
   return (
@@ -18,6 +20,12 @@ function Boot(): JSX.Element {
         <>
           <div class="muted center" style={{ maxWidth: '260px' }}>{bootError.value}</div>
           <Btn class="go" onClick={() => location.reload()}>{t('common.retry')}</Btn>
+        </>
+      ) : landing.value ? (
+        <>
+          <div class="muted center" style={{ maxWidth: '280px' }}>{t('app.tagline')}</div>
+          <Btn class="go" id="landing-play" onClick={() => landing.value?.()}>{t('landing.play')}</Btn>
+          {BOT ? <a class="btn sm" id="landing-tg" href={`https://t.me/${BOT}?startapp=site`} target="_blank" rel="noopener">{t('landing.telegram')}</a> : null}
         </>
       ) : (
         <>

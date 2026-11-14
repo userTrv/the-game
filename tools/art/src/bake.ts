@@ -110,3 +110,20 @@ figcaption{font-size:10px;opacity:.75;margin-top:4px}
 svg{display:block;margin:0 auto}</style><h1>Shellter — все спрайты</h1>${preview}`,
 );
 console.log(`total: ${seen.size} sprites, ${(totalBytes / 1024).toFixed(0)} KB`);
+
+// --- App icons and the share card (committed, unlike atlases: the HTML shell references them) ----
+const logo = ALL_GROUPS['core']!.find((s) => s.id === 'ui/logo');
+if (logo) {
+  const pub = join(root, 'apps/client/public');
+  const inner = logo.svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  const bg = (w: number, h: number) =>
+    `<defs><linearGradient id="icbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bfd9"/><stop offset="0.6" stop-color="#14609a"/><stop offset="1" stop-color="#1a1f56"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#icbg)"/>`;
+  const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">${bg(512, 512)}<g transform="translate(64 64) scale(${384 / logo.w})">${inner}</g></svg>`;
+  const og = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">${bg(1200, 630)}<g transform="translate(390 105) scale(${420 / logo.w})">${inner}</g></svg>`;
+  const png = (svg: string, width: number) =>
+    new Resvg(svg, { fitTo: { mode: 'width', value: width }, font: { loadSystemFonts: false } }).render().asPng();
+  writeFileSync(join(pub, 'icon.svg'), icon);
+  writeFileSync(join(pub, 'icon-192.png'), png(icon, 192));
+  writeFileSync(join(pub, 'icon-512.png'), png(icon, 512));
+  writeFileSync(join(pub, 'og.png'), png(og, 1200));
+}

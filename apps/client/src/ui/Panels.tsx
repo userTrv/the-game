@@ -4,13 +4,13 @@ import {
   type InboxItem, type QuestProgress, type ShopView,
 } from '@shellter/shared';
 import type { JSX } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { api } from '../api';
 import { duration, lang, local, num, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
 import { platformKind, tg } from '../platform/telegram';
 import { sfx } from '../sound';
-import { battle, busy, ended, errorText, isTelegram, liveops, meta, panel, player, refreshMe, run, screen, setLang, setSettings, settings, showToast, track } from '../state';
+import { applyAuth, battle, busy, ended, errorText, isTelegram, liveops, meta, panel, player, refreshMe, run, screen, setLang, setSettings, settings, showToast, track } from '../state';
 import { Btn, CostView, flyIcons, Res, Sheet, Spr } from './kit';
 
 const close = (): void => {
@@ -334,6 +334,30 @@ function Toggle(props: { on: boolean; onChange: (v: boolean) => void; id?: strin
   return <button class={`toggle ${props.on ? 'on' : ''}`} id={props.id} role="switch" aria-checked={props.on} onClick={() => { sfx('ui_tap'); props.onChange(!props.on); }} />;
 }
 
+/** Official Telegram Login Widget: binds the website guest to a Telegram account (same progress in the Mini App). */
+function LoginWidget({ bot }: { bot: string }): JSX.Element {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const w = window as unknown as { onShellterTgAuth?: (user: Record<string, string | number>) => void };
+    w.onShellterTgAuth = (user) => {
+      api.authWidget(user).then((res) => { applyAuth(res); panel.value = null; void refreshMe(); }).catch((e: unknown) => showToast(errorText(e)));
+    };
+    const el = document.createElement('script');
+    el.async = true;
+    el.src = 'https://telegram.org/js/telegram-widget.js?22';
+    el.setAttribute('data-telegram-login', bot);
+    el.setAttribute('data-size', 'large');
+    el.setAttribute('data-radius', '14');
+    el.setAttribute('data-request-access', 'write');
+    el.setAttribute('data-onauth', 'onShellterTgAuth(user)');
+    host.current?.appendChild(el);
+    return () => {
+      delete w.onShellterTgAuth;
+    };
+  }, [bot]);
+  return <div ref={host} id="tg-login" class="center" />;
+}
+
 export function SettingsSheet(): JSX.Element | null {
   const p = player.value;
   const s = settings.value;
@@ -414,7 +438,7 @@ export function SettingsSheet(): JSX.Element | null {
         {p.guest ? (
           <div class="item col" style={{ alignItems: 'stretch' }}>
             <span class="muted small">{t('settings.guest')}</span>
-            {isTelegram() || import.meta.env.VITE_BOT_USERNAME ? <Btn class="sm" id="link-tg" onClick={() => void link()}>{t('settings.link')}</Btn> : null}
+            {isTelegram() ? <Btn class="sm" id="link-tg" onClick={() => void link()}>{t('settings.link')}</Btn> : import.meta.env.VITE_BOT_USERNAME ? <LoginWidget bot={import.meta.env.VITE_BOT_USERNAME as string} /> : null}
           </div>
         ) : null}
         <Btn class="ghost wide" id="invite-btn" onClick={() => void invite()}>{t('settings.invite')}</Btn>

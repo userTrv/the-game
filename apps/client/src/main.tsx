@@ -5,8 +5,10 @@ import { loadAtlas } from './gfx/assets';
 import { calm } from './gfx/fx';
 import { initStage, setPaused, takeFps } from './gfx/stage';
 import { t } from './i18n';
+import { loadLocal, saveLocal } from './platform/storage';
+import { platformKind } from './platform/telegram';
 import { unlockAudioOnGesture } from './sound';
-import { authenticate, bootError, flushAnalytics, loadProgress, player, refreshMe, run, screen, screenForRun, sessionSeconds, settings, startRun, track } from './state';
+import { authenticate, bootError, landing, flushAnalytics, loadProgress, player, refreshMe, run, screen, screenForRun, sessionSeconds, settings, startRun, track } from './state';
 import './styles.css';
 import { App } from './ui/App';
 
@@ -31,11 +33,16 @@ async function boot(): Promise<void> {
     await refreshMe().catch(() => undefined);
     step();
     startDirector();
-    track('session_start', { platform: (await import('./platform/telegram')).platformKind() });
+    track('session_start', { platform: platformKind() });
     // Biome art is fetched in the background so pools start instantly.
     void loadAtlas('lagoon');
     void loadAtlas('town');
     const p = player.value;
+    if (platformKind() === 'web' && !loadLocal('played', false) && !new URLSearchParams(location.search).has('play')) {
+      await new Promise<void>((resolve) => (landing.value = resolve));
+      landing.value = null;
+    }
+    saveLocal('played', true);
     if (run.value) screen.value = screenForRun(run.value);
     else if (p && !p.profile.tutorialDone) {
       // First launch: straight into the first pool. Menus come after the first run.

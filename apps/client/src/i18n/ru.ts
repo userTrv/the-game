@@ -3,6 +3,8 @@ export const ru: Record<string, string> = {
   'app.name': 'Shellter',
   'app.tagline': 'Риф на спине',
   'loading': 'Ныряем…',
+  'landing.play': 'Играть',
+  'landing.telegram': 'Открыть в Telegram',
   'common.ok': 'Хорошо',
   'common.back': 'Назад',
   'common.close': 'Закрыть',

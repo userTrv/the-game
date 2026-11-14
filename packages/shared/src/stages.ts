@@ -37,7 +37,7 @@ export function stageInfo(stage: number): StageInfo {
     biome,
     segment,
     loop,
-    baseTier: 1 + 2 * segment,
+    baseTier: 1 + segment,
     guardianHpMult: Math.pow(ENDLESS_HP_MULT, loop),
     guardianAtkMult: Math.pow(ENDLESS_ATK_MULT, loop),
   };

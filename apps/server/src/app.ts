@@ -112,6 +112,7 @@ export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { 
   };
 
   r.get('/health', async () => ({ ok: true }));
+  r.get('/api/health', async () => ({ ok: true }));
   r.get('/ready', async () => {
     await ctx.db.select({ id: players.id }).from(players).limit(1);
     return { ok: true };

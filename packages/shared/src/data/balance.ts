@@ -5,7 +5,7 @@ export const BAL = {
   // --- Growth --------------------------------------------------------------------------------
   /** XP to grow from size S to S+1. */
   xpNeedBase: 10,
-  xpNeedPow: 2.2,
+  xpNeedPow: 1.8,
   /** XP for eating a creature of tier t. */
   xpTierPow: 1.5,
   hpPerSize: 0.12,
@@ -108,10 +108,10 @@ export const BAL = {
 export const GENE_PASSIVE: Record<Diet, ModPatch> = {
   sting: { hastePct: 3 },
   spike: { thorns: 1 },
-  glow: { crit: 2 },
+  glow: { crit: 3, atkPct: 2 },
   armor: { armor: 6 },
   venom: { atkPct: 3 },
-  soft: { hpPct: 4 },
+  soft: { hpPct: 7 },
 };
 export const GENE_PASSIVE_MAX_STEPS = 8;
 

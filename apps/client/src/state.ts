@@ -34,6 +34,8 @@ export const battle = signal<BattleView | null>(null);
 /** Events of the last action; screens animate merges, growth and so on from them. */
 export const lastEvents = signal<RunEvent[]>([]);
 export const loadProgress = signal(0);
+/** Website first visit: the boot screen doubles as a landing page until the visitor taps Play. */
+export const landing = signal<(() => void) | null>(null);
 
 export interface Settings {
   music: number;
@@ -107,7 +109,7 @@ export function sessionSeconds(): number {
 
 // --- Auth and boot ---------------------------------------------------------------------------------
 
-function applyAuth(res: { token: string; secret?: string; player: PlayerView; run: PublicRun | null }): void {
+export function applyAuth(res: { token: string; secret?: string; player: PlayerView; run: PublicRun | null }): void {
   setToken(res.token);
   if (res.secret) saveLocal('guest_secret', res.secret, true);
   player.value = res.player;
