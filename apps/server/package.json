@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/main.js --sourcemap && node scripts/copy-assets.mjs",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --packages=external --alias:@shellter/shared=../../packages/shared/src/index.ts --outfile=dist/main.js --sourcemap && node scripts/copy-assets.mjs",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
