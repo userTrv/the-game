@@ -188,8 +188,20 @@ export async function loadBackdrop(): Promise<void> {
   painted = null;
   try {
     const t = await Assets.load<Texture>(`${import.meta.env.BASE_URL}assets/img/deep.jpg`);
-    t.source.addressMode = 'mirror-repeat';
-    painted = t;
+    // The painting does not tile by itself: four mirrored copies make one tile whose edges always match,
+    // otherwise every repeat shows as a dark rectangle drifting under the crab.
+    const q = 512;
+    const c = document.createElement('canvas');
+    c.width = q * 2;
+    c.height = q * 2;
+    const g = c.getContext('2d');
+    if (!g) return;
+    const img = t.source.resource as CanvasImageSource;
+    for (const [fx, fy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      g.setTransform(fx ? -1 : 1, 0, 0, fy ? -1 : 1, fx ? q * 2 : 0, fy ? q * 2 : 0);
+      g.drawImage(img, 0, 0, q, q);
+    }
+    painted = Texture.from(c);
   } catch {
     /* no painted backdrop: the procedural layers are enough */
   }
@@ -242,7 +254,7 @@ export class Deep {
     };
 
     const art = painted;
-    if (art) add(art, 0.3, { alpha: 0.9, scale: 0.75, tint: PAINT_TINT[biome] ?? 0xffffff });
+    if (art) add(art, 0.3, { alpha: 0.9, scale: 1.5, tint: PAINT_TINT[biome] ?? 0xffffff });
     add(hazeTexture(), 0.18, { alpha: art ? 0.5 : 0.9, tint: look.haze, scale: 2.2, add: true, vx: 2, vy: 1 });
     add(hazeTexture(), 0.42, { alpha: art ? 0.35 : 0.6, tint: look.glow, scale: 1.1, add: true, vx: -3, vy: 2 });
     add(motesTexture(3, 90, 2), 0.62, { alpha: 0.5, tint: look.glow, add: true, vx: 3, vy: -4 });

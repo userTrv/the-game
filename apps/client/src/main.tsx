@@ -1,6 +1,6 @@
 import { effect } from '@preact/signals';
 import { render } from 'preact';
-import { startDirector } from './director';
+import { hunt, startDirector } from './director';
 import { loadAtlas } from './gfx/assets';
 import { loadBackdrop } from './gfx/deep';
 import { initFullscreen } from './platform/fullscreen';
@@ -10,7 +10,7 @@ import { t } from './i18n';
 import { loadLocal, saveLocal } from './platform/storage';
 import { platformKind } from './platform/telegram';
 import { unlockAudioOnGesture } from './sound';
-import { authenticate, bootError, landing, flushAnalytics, loadProgress, player, refreshMe, run, screen, screenForRun, sessionSeconds, settings, startRun, track } from './state';
+import { authenticate, bootError, landing, flushAnalytics, loadProgress, panel, player, refreshMe, run, screen, screenForRun, sessionSeconds, settings, startRun, track } from './state';
 import './styles.css';
 import { App } from './ui/App';
 
@@ -59,6 +59,16 @@ async function boot(): Promise<void> {
 }
 
 initFullscreen();
+
+// Esc closes the open panel, or opens the settings (which pauses the pool).
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Escape' || e.repeat) return;
+  if (panel.value) panel.value = null;
+  else if (player.value) {
+    hunt()?.setPaused(true);
+    panel.value = 'settings';
+  }
+});
 
 document.addEventListener('visibilitychange', () => {
   setPaused(document.hidden);
