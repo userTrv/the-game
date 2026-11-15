@@ -119,7 +119,7 @@ export const BAL = {
     trophyPearls: 3,
     trophyGenes: 3,
     /** A predator freezes this long before biting; hiding inside the window parries the bite. */
-    biteWindup: 0.45,
+    biteWindup: 0.55,
     parryStun: 2,
     /** Pearls: nothing respawns. */
     oysterPearls: 1,

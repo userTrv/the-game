@@ -1,24 +1,25 @@
 import { useSignal } from '@preact/signals';
 import {
-  BAL, CHAPTER_STAGES, DIETS, familyCounts, frontCount, guardianDef, heroDef, mutationDef, orderPrice, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
-  SET_THRESHOLDS, shellDef, slotCount, stageInfo, tenantDef, wouldMerge, xpNeed,
-  type Diet, type Enemy, type Offer, type PublicRun, type TenantInst,
+  BAL, CHAPTER_STAGES, DIETS, duelPearls, familyCounts, frontCount, guardianDef, heroDef, mutationDef, orderPrice, POOLS, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
+  SET_THRESHOLDS, shellDef, slotCount, slotLinks, stageInfo, tenantDef, TROPHY_LOSS, TROPHY_WIN, wouldMerge, xpNeed,
+  type Diet, type Enemy, type GuardianAbility, type Offer, type Pool, type PublicRun, type SlotLinks, type TenantInst,
 } from '@shellter/shared';
 import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { api } from '../api';
 import { battleScene, hunt, showcase } from '../director';
-import { name, num, t } from '../i18n';
+import { frame } from '../gfx/assets';
+import { name, num, stat, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
 import { battleHud, battleSpeed, buildOfRun } from '../scenes/battle';
 import { huntHud } from '../scenes/hunt';
 import { sfx } from '../sound';
 import { act, battle, busy, ended, haptic, lastEvents, meta, panel, player, run, screen, screenForRun, showToast, track } from '../state';
-import { abilityText, Bar, Btn, DietIcon, flyIcons, Ico, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
+import { abilityText, Bar, Btn, DietIcon, flyIcons, Ico, LinkLine, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
 
 /** Hints that mention a finger have a mouse wording for desktop. */
 const MOUSE = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
-const MOUSE_HINTS = new Set(['hunt.hint.move', 'hunt.hint.hide']);
+const MOUSE_HINTS = new Set(['hunt.hint.move', 'hunt.hint.hide', 'hunt.hint.parry']);
 const DIET_STATUS: Record<string, string> = { poison: '☠\uFE0E', blind: '◌', stun: 'ϟ', weak: '▾', slow: '≈', mark: '◎' };
 
 // --- Hunt HUD -------------------------------------------------------------------------------------
@@ -108,13 +109,14 @@ function TenantTip(props: { tn: TenantInst; r: PublicRun; children?: ComponentCh
         <span class="muted tiny">{t(`camp.role.${def.role}`)}</span>
       </div>
       <div class="small">{abilityText(def.ability, tn.star)}</div>
+      {def.link ? <LinkLine link={def.link} star={tn.star} heroId={r.cfg.heroId} /> : null}
       {tn.star < 3 ? <div class="muted tiny"><Stars n={tn.star + 1} /> {abilityText(def.ability, (tn.star + 1) as 2 | 3)}</div> : null}
       {props.children}
     </>
   );
 }
 
-function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: boolean; onPick: () => void; id: string }): JSX.Element {
+function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: boolean; onPick: () => void; id: string; foe?: { id: string; weak: readonly Diet[] } | null }): JSX.Element {
   const { offer: o, r } = props;
   const diets = offerDiets(o);
   const topGene = DIETS.reduce((a, b) => (r.genes[b] > r.genes[a] ? b : a), DIETS[0]);
@@ -129,6 +131,7 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
         <Spr id={`tenant/${o.id}`} size={50} />
         <div class="nm">{name('tenant', o.id)} <Stars n={o.star} /></div>
         <div class="ds">{tenantText(o.id, o.star)}</div>
+        {tenantDef(o.id).link ? <LinkLine link={tenantDef(o.id).link!} star={o.star} heroId={r.cfg.heroId} /> : null}
         {have > 0 ? <MergePips have={have} need={heroDef(r.cfg.heroId).mergeCount} full={merge} /> : null}
       </>
     );
@@ -160,6 +163,7 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
           {t(`diet.${diets[0]}`)}
         </span>
       ) : null}
+      {props.foe && o.type === 'tenant' && props.foe.weak.includes(tenantDef(o.id).families[0]) ? <span class="foe"><Spr id={`guardian/${props.foe.id}`} size={22} /><Ico id="weak" size={11} /></span> : null}
       {why ? <span class="why" title={t('camp.because', { diet: t(`diet.${topGene}`) })}><DietIcon diet={topGene} size={20} /></span> : null}
       {body}
       {props.price !== undefined ? (
@@ -172,19 +176,26 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
   );
 }
 
+/** Cell size and gap of the shell grid, px. Links are drawn in the gaps. */
+const CELL = 48;
+const GAP = 14;
+
 /**
- * The shell's slots. A tap opens the tenant's bubble (or names the slot when something waits to be
- * placed); dragging a tenant onto another slot moves or swaps it.
+ * The shell as a grid: front row on top, back row under it. A tap opens the tenant's bubble (or names
+ * the cell when something waits to be placed); dragging a tenant onto another cell moves or swaps it.
+ * Neighbours that work together are joined by a glowing bridge, and while a tenant is dragged the
+ * bridges show what the shell would look like if it were dropped right there.
  */
-function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean; onTap: (i: number) => void; onMove: (from: number, to: number) => void; merged: number[]; tip: JSX.Element | null }): JSX.Element {
+function ShellGrid(props: { r: PublicRun; open: number | null; picking: boolean; onTap: (i: number) => void; onMove: (from: number, to: number) => void; merged: number[]; tip: JSX.Element | null }): JSX.Element {
   const { r } = props;
-  const fc = frontCount(r.slots.length);
+  const n = r.slots.length;
+  const cols = frontCount(n);
   const drag = useSignal<{ from: number; x: number; y: number; over: number | null } | null>(null);
   const press = useRef<{ i: number; x: number; y: number; id: number } | null>(null);
   const dragged = useRef(false);
   const wrap = useRef<HTMLDivElement>(null);
   const slotAt = (x: number, y: number): number | null => {
-    // Whatever lies on top (the dragged tenant itself, a bubble), the slot underneath counts.
+    // Whatever lies on top (the dragged tenant itself, a bubble), the cell underneath counts.
     for (const el of document.elementsFromPoint(x, y)) {
       const slot = el.closest('.slot');
       if (slot) return Number(slot.id.slice(5));
@@ -217,7 +228,7 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
     drag.value = null;
   };
   useEffect(() => {
-    // Safety net: if the release never reaches the slot (capture lost, window blurred), drop here.
+    // Safety net: if the release never reaches the cell (capture lost, window blurred), drop here.
     const end = (e: Event): void => {
       if (!press.current && !drag.value) return;
       if (e instanceof PointerEvent && e.type === 'pointerup') up(e);
@@ -234,13 +245,25 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
   });
   const d = drag.value;
   const held = d ? r.slots[d.from] : null;
+  // While a tenant hangs over another cell the grid previews the swap.
+  const swap = d && d.over !== null && d.over !== d.from ? { a: d.from, b: d.over } : null;
+  const src = (i: number): number => (swap ? (i === swap.a ? swap.b : i === swap.b ? swap.a : i) : i);
+  const shown = r.slots.map((_, i) => r.slots[src(i)] ?? null);
+  const now: SlotLinks = slotLinks(r.slots, r.cfg.heroId);
+  const links: SlotLinks = swap ? slotLinks(shown, r.cfg.heroId) : now;
+  const at = (i: number): { x: number; y: number } => ({ x: (i < cols ? i : i - cols) * (CELL + GAP), y: i < cols ? 0 : CELL + GAP });
   const cell = (tn: TenantInst | null, i: number): JSX.Element => {
     const def = tn ? tenantDef(tn.id) : null;
-    const row = i < fc ? 'front' : 'back';
-    const cls = `slot ${row} ${props.open === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''} ${d?.from === i ? 'lift' : ''} ${d && d.over === i && d.from !== i ? 'over' : ''} ${props.picking ? 'pick' : ''}`;
+    const row = i < cols ? 'front' : 'back';
+    const from = src(i);
+    const gain = swap && tn ? Math.sign(((links.power[i] ?? 1) - (now.power[from] ?? 1)) + ((now.cd[from] ?? 1) - (links.cd[i] ?? 1))) : 0;
+    const pct = Math.round(((links.power[i] ?? 1) - 1) * 100);
+    const fast = Math.round((1 - (links.cd[i] ?? 1)) * 100);
+    const solo = links.active.some((l) => l.kind === 'solo' && l.from === i);
+    const cls = `slot ${row} ${props.open === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''} ${d?.from === i && !swap ? 'lift' : ''} ${d && d.over === i && d.from !== i ? 'over' : ''} ${props.picking ? 'pick' : ''} ${gain > 0 ? 'boost' : gain < 0 ? 'drop' : ''} ${solo ? 'solo' : ''}`;
     return (
       <button
-        class={cls} key={`${i}-${tn?.id ?? 'x'}-${tn?.star ?? 0}`} id={`slot-${i}`}
+        class={cls} key={i} id={`slot-${i}`} style={{ left: `${at(i).x}px`, top: `${at(i).y}px` }}
         onPointerDown={(e) => down(e, i)} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}
         onClick={() => {
           if (dragged.current) {
@@ -250,30 +273,48 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
           props.onTap(i);
         }}
       >
-        {tn ? <Spr id={`tenant/${tn.id}`} size={34} /> : <span class="tiny muted">+</span>}
+        {tn ? <Spr id={`tenant/${tn.id}`} size={36} /> : null}
         {tn ? <Stars n={tn.star} /> : null}
         {def && def.role === row ? <span class="ok" /> : null}
+        {tn && (pct > 0 || fast > 0) ? <span class="amp">{pct > 0 ? `+${pct}` : `»${fast}`}</span> : null}
       </button>
     );
   };
-  // The bubble hangs over its slot and stays inside the panel.
-  // The ghost is placed inside the strip: the panel's blur makes it the origin for fixed children too.
+  const bridge = (l: SlotLinks['active'][number], k: number): JSX.Element | null => {
+    if (l.kind === 'solo') return null;
+    const a = at(l.from);
+    const b = at(l.to);
+    const horizontal = a.y === b.y;
+    const x = horizontal ? Math.min(a.x, b.x) + CELL : a.x + CELL / 2;
+    const y = horizontal ? a.y + CELL / 2 : Math.min(a.y, b.y) + CELL;
+    // An aura flows from its owner to the neighbour, a bond the other way: the bead shows who gets stronger.
+    const to = l.kind === 'aura' ? l.to : l.from;
+    const other = l.kind === 'aura' ? l.from : l.to;
+    const fwd = horizontal ? at(to).x > at(other).x : at(to).y > at(other).y;
+    return <i class={`bridge diet-${l.family} ${horizontal ? 'h' : 'v'} ${fwd ? 'fwd' : 'rev'} ${l.stat}`} key={`${k}-${l.from}-${l.to}`} style={{ left: `${x}px`, top: `${y}px` }} />;
+  };
+  // The bubble hangs over its cell and stays inside the panel.
+  // The ghost is placed inside the grid: the panel's blur makes it the origin for fixed children too.
   const box = wrap.current?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0 };
   // Screen pixels to layout pixels, in case an ancestor is scaled (screen transitions).
   const zoom = box.width > 0 && wrap.current ? wrap.current.offsetWidth / box.width : 1;
-  const anchor = props.open !== null ? document.getElementById(`slot-${props.open}`) : null;
   const W = wrap.current?.clientWidth ?? 320;
+  const gw = cols * CELL + (cols - 1) * GAP;
+  const ox = (W - gw) / 2;
   const tw = Math.min(300, W);
-  const cx = anchor ? anchor.offsetLeft + anchor.offsetWidth / 2 : W / 2;
+  const open = props.open;
+  const cx = open !== null ? ox + at(open).x + CELL / 2 : W / 2;
   const left = Math.max(0, Math.min(W - tw, cx - tw / 2));
+  const rows = n > cols ? 2 : 1;
   return (
-    <div class="col slots-wrap" style={{ gap: '3px' }} ref={wrap}>
-      <div class="row between rowlabel">
-        <span style={{ color: '#ffb37a' }}><Spr id="icon/front" size={12} /> {t('camp.front')}</span>
-        <span style={{ color: '#7fd6ff' }}>{t('camp.back')} <Spr id="icon/back" size={12} /></span>
+    <div class="slots-wrap" ref={wrap}>
+      <div class={`grid ${d ? 'dragging' : ''}`} style={{ width: `${gw}px`, height: `${rows * CELL + (rows - 1) * GAP}px` }}>
+        <span class="rowmark front" style={{ top: `${CELL / 2}px` }}><Spr id="icon/front" size={13} /></span>
+        {rows > 1 ? <span class="rowmark back" style={{ top: `${CELL + GAP + CELL / 2}px` }}><Spr id="icon/back" size={13} /></span> : null}
+        {links.active.map(bridge)}
+        {shown.map(cell)}
       </div>
-      <div class="slots">{r.slots.map(cell)}</div>
-      {props.tip && anchor ? <div class="tip col" id="tenant-tip" style={{ left: `${left}px`, width: `${tw}px`, '--ax': `${cx - left}px` }}>{props.tip}</div> : null}
+      {props.tip && open !== null ? <div class="tip col" id="tenant-tip" style={{ left: `${left}px`, width: `${tw}px`, bottom: `${rows * CELL + (rows - 1) * GAP - at(open).y + 10}px`, '--ax': `${cx - left}px` }}>{props.tip}</div> : null}
       {d && held ? <span class="drag-ghost" style={{ left: `${(d.x - box.left) * zoom}px`, top: `${(d.y - box.top) * zoom}px` }}><Spr id={`tenant/${held.id}`} size={46} /></span> : null}
     </div>
   );
@@ -317,6 +358,106 @@ function SetChips(props: { r: PublicRun }): JSX.Element | null {
   );
 }
 
+/** The guardian waiting further down: who it is, how many pools away, what hurts it and what does not. */
+function GuardianAhead(props: { r: PublicRun; after: number; open: boolean; onToggle: () => void }): JSX.Element | null {
+  const { r, after } = props;
+  let stage = after + 1;
+  while (stage <= r.cfg.maxStage && stageInfo(stage).kind !== 'guardian') stage += 1;
+  if (stage > r.cfg.maxStage) return null;
+  const info = stageInfo(stage);
+  if (!info.guardianId) return null;
+  const def = guardianDef(info.guardianId);
+  const pools = stage - after - 1;
+  return (
+    <div class="ahead">
+      <button class={`orb foe ${pools === 0 ? 'near' : ''}`} id="guardian-ahead" aria-label={t(`guardian.${def.id}`)} onClick={props.onToggle}>
+        <Spr id={`guardian/${def.id}`} size={50} />
+      </button>
+      <div class="marks">
+        {def.weak.map((d) => <span class="mark wk" key={d}><DietIcon diet={d} size={17} /><Ico id="weak" size={10} /></span>)}
+        {def.resist.map((d) => <span class="mark rs" key={d}><DietIcon diet={d} size={17} /><Ico id="resist" size={10} /></span>)}
+      </div>
+      <div class="steps">{Array.from({ length: pools }).map((_, i) => <i key={i} />)}</div>
+      {props.open ? (
+        <div class="tip below col" id="guardian-tip">
+          <b>{info.loop > 0 ? t('guardian.ancient', { name: t(`guardian.${def.id}`) }) : t(`guardian.${def.id}`)}</b>
+          <div class="row wrap" style={{ gap: '8px' }}>
+            {def.weak.map((d) => <span class="row" style={{ gap: '3px', color: 'var(--accent)' }} key={d}><DietIcon diet={d} size={16} />×{BAL.weakMult}</span>)}
+            {def.resist.map((d) => <span class="row muted" style={{ gap: '3px' }} key={d}><DietIcon diet={d} size={16} />×{BAL.resistMult}</span>)}
+          </div>
+          {def.abilities.map((a, i) => (
+            <div class="row small" style={{ gap: '4px', alignItems: 'flex-start' }} key={i}><DietIcon diet={a.family} size={15} /><span>{guardianAbilityText(a)}</span></div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function guardianAbilityText(a: GuardianAbility): string {
+  const r1 = (v: number): string => String(Math.round(v * 10) / 10);
+  let s = stat(`ab.${a.kind}`, { v: r1(a.v) });
+  if (a.also) s += ` ${stat('ab.also', {})} ${stat(`ab.${a.also.kind}`, { v: r1(a.also.v) }).toLowerCase()}`;
+  return a.kind === 'burst' ? s : `${s}, ${stat('ab.cd', { v: r1(a.cd) })}`;
+}
+
+/** Another player's crab swimming by the camp. One spar per camp: pearls and cups, no lives at stake. */
+function Rival(props: { r: PublicRun; power: number; open: boolean; onToggle: () => void; onDuel: () => void }): JSX.Element | null {
+  const rival = props.r.camp?.rival;
+  if (!rival || props.r.camp?.dueled) return null;
+  const b = rival.build;
+  const skin = b.skin?.crab && frame(`crab/${b.skin.crab}/body`) ? b.skin.crab : b.heroId;
+  const edge = rival.power > props.power * 1.12 ? 'hard' : rival.power < props.power * 0.88 ? 'easy' : '';
+  return (
+    <div class="ahead left">
+      <button class="orb rival" id="rival" aria-label={rival.name} onClick={props.onToggle}>
+        <Spr id={`shell/${b.shell.id}`} size={40} class="sh" />
+        <Spr id={`crab/${skin}/body`} size={34} class="cr" />
+      </button>
+      <div class={`marks pw ${edge}`}><Spr id="icon/power" size={14} />{num(rival.power)}</div>
+      <div class="who">{rival.name}</div>
+      {props.open ? (
+        <div class="tip below col" id="rival-tip">
+          <div class="row wrap" style={{ gap: '3px' }}>
+            {b.slots.map((tn, i) => (tn ? <span class="mini" key={i}><Spr id={`tenant/${tn.id}`} size={26} /><Stars n={tn.star} /></span> : null))}
+          </div>
+          <div class="row between" style={{ gap: '8px' }}>
+            <span class="row small" style={{ gap: '6px' }}>
+              <span class="row" style={{ gap: '2px' }}><Spr id="icon/pearl" size={15} />+{duelPearls(props.r.camp?.after ?? 1)}</span>
+              <span class="row" style={{ gap: '2px' }}><Spr id="icon/trophy" size={15} />+{TROPHY_WIN}<span class="muted">/−{TROPHY_LOSS}</span></span>
+            </span>
+            <Btn class="sm go" id="duel-btn" onClick={props.onDuel}><Ico id="duel" size={18} /></Btn>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** How wild a current is, 1..3. */
+function poolRisk(p: Pool): number {
+  const def = POOLS[p.kind];
+  if (def.danger < 1) return 1;
+  return def.danger > 1 || def.stalkerFrom < 1 ? 3 : 2;
+}
+
+/** A current to dive into: what it is rich in and how dangerous it gets. */
+function Current(props: { pool: Pool; index: number; disabled: boolean; onPick: () => void }): JSX.Element {
+  const { pool } = props;
+  const def = POOLS[pool.kind];
+  const risk = poolRisk(pool);
+  return (
+    <button class={`current k-${pool.kind} ${pool.diet ? `diet-${pool.diet}` : ''}`} id={`path-${props.index}`} disabled={props.disabled} onClick={() => { sfx('ui_tap'); haptic('medium'); props.onPick(); }}>
+      <span class="bub">
+        {pool.kind === 'pearl' ? <Spr id="icon/pearl" size={26} /> : pool.kind === 'swarm' && pool.diet ? <DietIcon diet={pool.diet} size={26} /> : <Ico id={pool.kind === 'nest' ? 'nest' : pool.kind === 'dark' ? 'dark' : 'calm'} size={24} />}
+        {def.oyster > 1 ? <em>×{def.oyster}</em> : def.swarmWeight > 1 ? <em>×{def.swarmWeight}</em> : def.xp !== 1 ? <em class={def.xp > 1 ? 'up' : 'dn'}>{def.xp > 1 ? '▲' : '▼'}</em> : null}
+      </span>
+      <span class="nm">{t(`pool.${pool.kind}`)}</span>
+      <span class="risk">{[1, 2, 3].map((i) => <i class={i <= risk ? 'on' : ''} key={i} />)}</span>
+    </button>
+  );
+}
+
 function enemyName(e: Enemy): string {
   if (e.kind === 'ghost') return e.name;
   const base = t(`guardian.${e.id}`);
@@ -329,6 +470,7 @@ export function CampView(): JSX.Element | null {
   const selected = useSignal<number | null>(null);
   const pending = useSignal<{ kind: 'offer' | 'buy' | 'order'; index: number } | null>(null);
   const confirmCarry = useSignal(false);
+  const bubble = useSignal<'guardian' | 'rival' | null>(null);
   const merged = useSignal<number[]>([]);
   const tut = useSignal<string | null>(null);
   const evs = lastEvents.value;
@@ -366,7 +508,9 @@ export function CampView(): JSX.Element | null {
   useEffect(() => {
     // The tenant bubble closes on a tap anywhere else.
     const close = (e: PointerEvent): void => {
-      if (selected.value !== null && !(e.target as Element | null)?.closest?.('.tip, .slot')) selected.value = null;
+      const el = e.target as Element | null;
+      if (selected.value !== null && !el?.closest?.('.tip, .slot')) selected.value = null;
+      if (bubble.value !== null && !el?.closest?.('.ahead')) bubble.value = null;
     };
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
@@ -381,6 +525,12 @@ export function CampView(): JSX.Element | null {
   const atMax = next > r.cfg.maxStage;
   const nextInfo = atMax ? null : stageInfo(next);
   const waitingBattle = r.phase === 'battle' && r.battle !== null;
+  const paths = camp && !waitingBattle && !atMax && nextInfo?.kind === 'hunt' && camp.paths && camp.paths.length > 0 ? camp.paths : null;
+  // The guardian whose weakness the cards point at.
+  let foeStage = next;
+  while (foeStage <= r.cfg.maxStage && stageInfo(foeStage).kind !== 'guardian') foeStage += 1;
+  const foeId = foeStage <= r.cfg.maxStage ? stageInfo(foeStage).guardianId : undefined;
+  const foe = foeId ? { id: foeId, weak: guardianDef(foeId).weak } : null;
   const up = evs.filter((e) => e.type === 'gene_threshold').map((e) => (e.type === 'gene_threshold' ? e.diet : 'sting'));
 
   const needsSlot = (o: Offer): boolean => o.type === 'tenant' && !r.slots.includes(null) && !wouldMerge({ ...r, seed: '' }, o.id, o.star);
@@ -426,13 +576,18 @@ export function CampView(): JSX.Element | null {
     selected.value = null;
     void act({ type: 'move', from, to });
   };
-  const go = async (): Promise<void> => {
+  const duel = async (): Promise<void> => {
+    bubble.value = null;
+    const res = await act({ type: 'duel' });
+    if (res) screen.value = 'battle';
+  };
+  const go = async (path?: number): Promise<void> => {
     if (waitingBattle) {
       const res = await act({ type: 'battle' });
       if (res) screen.value = 'battle';
       return;
     }
-    const res = await act({ type: 'descend' });
+    const res = await act(path !== undefined ? { type: 'descend', path } : { type: 'descend' });
     if (!res) return;
     const now = run.value;
     if (now?.phase === 'battle') {
@@ -460,7 +615,7 @@ export function CampView(): JSX.Element | null {
   return (
     <div class="screen pass" id="camp">
       <div class="row between">
-        <span class="chip">{t('hunt.stage', { n: after })} · {t('camp.title')}</span>
+        <span class="chip">{t('hunt.stage', { n: after })}</span>
         <div class="row" style={{ gap: '5px' }}>
           <Res kind="pearl" value={r.pearls} id="camp-pearls" />
           <span class="chip" title={t('camp.lives')}>{Array.from({ length: Math.max(r.lives, 0) }).map((_, i) => <Spr id="icon/life" size={18} key={i} />)}</span>
@@ -477,11 +632,14 @@ export function CampView(): JSX.Element | null {
           <span class="chip tiny" title={t('camp.loot')}><Spr id="icon/coral" size={15} />{num(r.loot.coral)} <Spr id="icon/shine" size={15} />{num(r.loot.shine)}</span>
         </div>
       </div>
-      <div style={{ height: 'clamp(118px, 19vh, 190px)', flex: 'none' }} />
+      <div class="camp-stage">
+        {camp && !waitingBattle ? <Rival r={r} power={power} open={bubble.value === 'rival'} onToggle={() => (bubble.value = bubble.value === 'rival' ? null : 'rival')} onDuel={() => void duel()} /> : <span />}
+        <GuardianAhead r={r} after={waitingBattle ? after - 1 : after} open={bubble.value === 'guardian'} onToggle={() => (bubble.value = bubble.value === 'guardian' ? null : 'guardian')} />
+      </div>
       {tut.value ? <div class="hint shadow-text" style={{ marginTop: 0, marginBottom: '6px', fontSize: '14px' }} id="camp-tut">{t(tut.value)}</div> : null}
       <div class="panel col" style={{ gap: '8px', padding: '10px' }}>
         <SetChips r={r} />
-        <SlotStrip
+        <ShellGrid
           r={r} open={selected.value} picking={pending.value !== null} onTap={tapSlot} onMove={moveSlot} merged={merged.value}
           tip={sel && selected.value !== null ? (
             <TenantTip tn={sel} r={r}>
@@ -510,39 +668,41 @@ export function CampView(): JSX.Element | null {
         <div class="scroll col grow" style={{ marginTop: '6px', paddingTop: '10px', gap: '8px' }}>
           {!camp.offerTaken ? (
             <>
-              <div class="row between">
-                <span class="h2 shadow-text">{t('camp.pick')}</span>
-                <button class="chip tiny" id="skip-offer" onClick={() => void act({ type: 'skip_offer' })}>{t('camp.skip')}</button>
-              </div>
               <div class="cards" id="offers">
-                {camp.offers.map((o, i) => <OfferCard offer={o} r={r} key={`${i}-${camp.rerolls}`} id={`offer-${i}`} onPick={() => pick('offer', i, o)} />)}
+                {camp.offers.map((o, i) => <OfferCard offer={o} r={r} foe={foe} key={`${i}-${camp.rerolls}`} id={`offer-${i}`} onPick={() => pick('offer', i, o)} />)}
+              </div>
+              <div class="row" style={{ justifyContent: 'flex-end' }}>
+                <button class="chip tiny" id="skip-offer" onClick={() => void act({ type: 'skip_offer' })}><Ico id="next" size={14} /><Spr id="icon/pearl" size={14} />+2</button>
               </div>
             </>
           ) : null}
-          <div class="row between">
-            <span class="h2 shadow-text">{t('camp.shop')}</span>
+          <div class="row" style={{ justifyContent: 'flex-end' }}>
             <div class="row" style={{ gap: '5px' }}>
               {!r.flags.adReroll && (adsAvailable() || p.perks.noAds) ? (
-                <button class="chip tiny" id="reroll-ad" onClick={() => void reroll(true)}><Spr id="icon/ad" size={16} />{t('camp.reroll')}</button>
+                <button class="chip tiny" id="reroll-ad" aria-label={t('camp.reroll.ad')} onClick={() => void reroll(true)}><Spr id="icon/ad" size={16} />↻</button>
               ) : null}
-              <button class="chip tiny" id="reroll" onClick={() => void reroll(false)}>↻ {t('camp.reroll')} <Spr id="icon/pearl" size={14} />{rerollCost(camp)}</button>
+              <button class="chip tiny" id="reroll" aria-label={t('camp.reroll')} onClick={() => void reroll(false)}>↻ <Spr id="icon/pearl" size={14} />{rerollCost(camp)}</button>
             </div>
           </div>
           <div class="cards" id="shop" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-            {camp.shop.map((it, i) => <OfferCard offer={it.offer} r={r} price={it.price} sold={it.sold} key={`${i}-${camp.rerolls}`} id={`shop-${i}`} onPick={() => pick('buy', i, it.offer, it.price)} />)}
+            {camp.shop.map((it, i) => <OfferCard offer={it.offer} r={r} foe={foe} price={it.price} sold={it.sold} key={`${i}-${camp.rerolls}`} id={`shop-${i}`} onPick={() => pick('buy', i, it.offer, it.price)} />)}
           </div>
         </div>
       ) : <div class="grow" />}
-      <div class="row" style={{ marginTop: '8px', gap: '8px' }}>
+      <div class="row" style={{ marginTop: '8px', gap: '8px', alignItems: 'flex-end' }}>
         {!waitingBattle ? <Btn class="ghost sm" id="carry-btn" onClick={() => (confirmCarry.value = true)}>{t('camp.carry')}</Btn> : null}
-        <Btn class="go grow" id="descend-btn" disabled={(!waitingBattle && (atMax || !camp?.offerTaken)) || busy.value} onClick={() => void go()}>
-          <span class="col" style={{ gap: 0, alignItems: 'center' }}>
-            <span>{waitingBattle ? t('camp.fight.again') : nextInfo?.kind === 'guardian' ? t('camp.fight') : t('camp.descend')} ▸</span>
-            <span class="sub">
-              {waitingBattle && r.battle ? enemyName(r.battle.enemy) : atMax ? t('camp.next.max') : nextInfo?.kind === 'guardian' ? t('camp.next.guardian') : t('camp.next.hunt', { biome: t(`biome.${nextInfo?.biome ?? 'lagoon'}`) })}
+        {paths ? (
+          <div class={`currents grow ${camp?.offerTaken ? '' : 'wait'}`} id="currents">
+            {paths.map((pl, i) => <Current pool={pl} index={i} key={i} disabled={!camp?.offerTaken || busy.value} onPick={() => void go(i)} />)}
+          </div>
+        ) : (
+          <Btn class="go grow" id="descend-btn" disabled={(!waitingBattle && (atMax || !camp?.offerTaken)) || busy.value} onClick={() => void go()}>
+            <span class="col" style={{ gap: 0, alignItems: 'center' }}>
+              <span>{waitingBattle ? t('camp.fight.again') : nextInfo?.kind === 'guardian' ? t('camp.fight') : t('camp.descend')} ▸</span>
+              {waitingBattle && r.battle ? <span class="sub">{enemyName(r.battle.enemy)}</span> : atMax ? <span class="sub">{t('camp.next.max')}</span> : null}
             </span>
-          </span>
-        </Btn>
+          </Btn>
+        )}
       </div>
       {camp?.shellChoices ? (
         <Sheet mid title={t('camp.shell.title')} id="shell-sheet">
@@ -646,7 +806,7 @@ export function BattleView(): JSX.Element | null {
             {b.rewards && b.won ? (
               <div class="row center" style={{ gap: '8px' }}>
                 <Res kind="pearl" value={`+${b.rewards.pearls}`} />
-                <Res kind="shine" value={`+${b.rewards.shine}`} />
+                {b.rewards.shine ? <Res kind="shine" value={`+${b.rewards.shine}`} /> : null}
                 {b.rewards.trophies ? <Res kind="trophy" value={`+${b.rewards.trophies}`} /> : null}
               </div>
             ) : b.rewards?.trophies ? <div class="row center"><Res kind="trophy" value={b.rewards.trophies} /></div> : null}

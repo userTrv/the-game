@@ -1,4 +1,4 @@
-import { DIETS, tenantDef, type AbilityDef, type Cost, type Diet, type ModPatch, type Star, type TenantDef } from '@shellter/shared';
+import { DIETS, heroDef, tenantDef, type AbilityDef, type Cost, type Diet, type LinkDef, type ModPatch, type Star, type TenantDef } from '@shellter/shared';
 import type { ComponentChildren, JSX } from 'preact';
 import { atlasUrl, BAKE, frame, manifest } from '../gfx/assets';
 import { num, stat, t } from '../i18n';
@@ -40,6 +40,16 @@ const ICONS = {
   close: 'M6 6l12 12M18 6L6 18',
   pause: 'M9 5v14M15 5v14',
   next: 'M9 5l7 7-7 7',
+  calm: 'M2 9c3-3 6-3 9 0s6 3 11 0M2 15c3-3 6-3 9 0s6 3 11 0',
+  dark: 'M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
+  nest: 'M4 11h16v8H4zM4 11l2-5h12l2 5M10 14h4',
+  duel: 'M5 4l11 11M19 4L8 15M5 4v3M5 4h3M19 4v3M19 4h-3M6 14l4 4M18 14l-4 4M5 20l3-3M19 20l-3-3',
+  weak: 'M13 2L6 13h5l-1 9 8-12h-5z',
+  resist: 'M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z',
+  link: 'M9 15l6-6M10 7l1.5-1.5a3.5 3.5 0 0 1 5 5L15 12M14 17l-1.5 1.5a3.5 3.5 0 0 1-5-5L9 12',
+  lock: 'M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3',
+  fang: 'M5 5h14l-3 6-2-3-2 11-2-11-2 3z',
+  shell: 'M4 18c0-8 5-13 11-13 4 0 6 3 6 6 0 4-3 7-7 7zM4 18h10M9 18c0-5 2-8 6-9',
 } as const;
 
 /** Line icon drawn with the text colour. */
@@ -162,6 +172,20 @@ export function abilityText(a: AbilityDef, star: Star): string {
 
 export function tenantText(id: string, star: Star): string {
   return abilityText(tenantDef(id).ability, star);
+}
+
+/** One line for what a tenant does to (or gets from) its neighbours. */
+export function LinkLine(props: { link: LinkDef; star: Star; heroId: string }): JSX.Element {
+  const { link } = props;
+  const v = r1((link.v[props.star - 1] as number) * (heroDef(props.heroId).linkPower ?? 1));
+  const key = link.kind === 'aura' ? `link.aura.${link.stat}` : `link.${link.kind}`;
+  return (
+    <div class="linkline">
+      <Ico id="link" size={15} />
+      {link.family ? <DietIcon diet={link.family} size={15} /> : null}
+      <span>{t(link.family && link.kind !== 'solo' ? `${key}.family` : key, { v })}</span>
+    </div>
+  );
 }
 
 export function roleKey(def: TenantDef): string {

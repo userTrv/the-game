@@ -18,6 +18,7 @@ export const HEROES: HeroLook[] = [
   { id: 'hermit', body: PAL.crab, belly: '#ffd9b8', claw: '#ff6a3d', leg: '#f0623a', shape: 0 },
   { id: 'decorator', body: '#3fbfa8', belly: '#d6fff0', claw: '#2fa392', leg: '#2a9484', shape: 1 },
   { id: 'mantis', body: '#57c84d', belly: '#fff2a8', claw: '#ff5a6e', leg: '#3a9fe0', shape: 2 },
+  { id: 'weaver', body: '#a67cf5', belly: '#efe4ff', claw: '#5fe0cf', leg: '#7d5fd6', shape: 1 },
 ];
 
 /** Paid/earned colourways recolour the hermit-shaped parts. */

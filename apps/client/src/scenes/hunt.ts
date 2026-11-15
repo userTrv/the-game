@@ -1,8 +1,8 @@
 import { signal } from '@preact/signals';
 import {
-  BAL, buildAbilities, buildFighter, computeMods, createRng, feed, genesForTier, heroDef, sizeScale, spawnTable, stageInfo, xpNeed,
+  BAL, buildAbilities, buildFighter, computeMods, CREATURES, createRng, feed, genesForTier, heroDef, poolDef, poolDietWeights, sizeScale, spawnTable, stageInfo, xpNeed,
   zeroDiets, type AbilityInst, type ActiveKind, type BuildSnapshot, type CreatureDef, type DietMap, type Fighter, type HuntReport,
-  type Mods, type PublicRun, type Rng, type SpawnEntry,
+  type Mods, type PoolDef, type PublicRun, type Rng, type SpawnEntry,
 } from '@shellter/shared';
 import type { Sprite} from 'pixi.js';
 import { Container, Graphics, Sprite as PixiSprite } from 'pixi.js';
@@ -37,6 +37,9 @@ export interface HuntHud {
   /** Distance from the entry point, metres. */
   dist: number;
   stalkers: number;
+  /** The marked prey: still out there, eaten, or this pool has none. */
+  trophy: 'out' | 'done' | null;
+  parries: number;
 }
 
 export const huntHud = signal<HuntHud | null>(null);
@@ -71,6 +74,12 @@ interface Creature {
   stalker: boolean;
   /** Guards a chest: stays near its nest. */
   home: { x: number; y: number } | null;
+  /** The pool's marked prey. */
+  trophy: boolean;
+  /** Seconds left of the freeze before a bite; 0 = not about to bite. */
+  windT: number;
+  /** Clock time the wind-up began at: hiding after it parries the bite. */
+  windAt: number;
 }
 
 /** A pearl dropped by a slain predator, waiting to be picked up. */
@@ -88,6 +97,7 @@ interface Morsel {
   y: number;
   s: Sprite;
   age: number;
+  trophy?: boolean;
 }
 
 type NodeKind = 'oyster' | 'coral' | 'glitter' | 'chest';
@@ -123,6 +133,8 @@ interface Saved {
   size: number;
   xp: number;
   gained: DietMap;
+  trophy?: boolean;
+  parries?: number;
 }
 
 export class HuntScene implements Scene {
@@ -188,6 +200,18 @@ export class HuntScene implements Scene {
   private info;
   private tutorial: boolean;
   private dangerTime: number;
+  private pool: PoolDef;
+  /** The marked prey of this pool and whether it has been eaten. */
+  private trophyDone = false;
+  private trophyMark = new Graphics();
+  private compass = new Graphics();
+  private tele = new Graphics();
+  private parries = 0;
+  /** Clock time the crab last went into its shell. */
+  private hidAt = -1;
+  private sawWind = false;
+  private w = 390;
+  private h = 700;
   private canvas: HTMLCanvasElement;
   /** Arrow keys and WASD steer like a held finger: the crab walks while a key is down and hides when all are up. */
   private keys = new Set<string>();
@@ -208,23 +232,46 @@ export class HuntScene implements Scene {
     const len = Math.hypot(dx, dy);
     return len > 0 ? { x: this.cx + (dx / len) * 160, y: this.cy - 14 + (dy / len) * 160 } : null;
   }
+  /** Space tucks the crab in without letting go of the arrows: the quick way to parry. */
+  private spaceDown = false;
+  private hide(): void {
+    if (this.hidden) return;
+    this.hidden = true;
+    this.hidAt = this.time;
+    sfx('hide', { volume: 0.5 });
+  }
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (!(e.code in HuntScene.KEY_DIR) || this.finished) return;
+    if (this.finished) return;
     const el = e.target as HTMLElement | null;
-    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'BUTTON')) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (this.paused || e.repeat) return;
+      this.spaceDown = true;
+      this.hide();
+      return;
+    }
+    if (!(e.code in HuntScene.KEY_DIR)) return;
     e.preventDefault();
     if (this.paused) this.setPaused(false);
     this.keys.add(e.code);
     this.byKeys = true;
-    this.hidden = false;
+    if (!this.spaceDown) this.hidden = false;
     this.idleT = 0;
   };
   private onKeyUp = (e: KeyboardEvent): void => {
+    if (e.code === 'Space') {
+      if (!this.spaceDown) return;
+      this.spaceDown = false;
+      if (!this.paused && !this.finished && (this.keys.size > 0 || (this.target && !this.byKeys))) this.hidden = false;
+      return;
+    }
     if (!this.keys.delete(e.code) || this.keys.size > 0 || !this.byKeys) return;
     this.byKeys = false;
     this.onUp();
   };
   private onBlur = (): void => {
+    this.spaceDown = false;
     if (this.keys.size === 0) return;
     this.keys.clear();
     this.byKeys = false;
@@ -238,9 +285,10 @@ export class HuntScene implements Scene {
   constructor(private run: PublicRun, private onDone: (report: HuntReport) => void) {
     this.info = stageInfo(run.stage);
     this.tutorial = run.cfg.tutorial && run.stage === 1;
-    this.dangerTime = H.dangerTime * (this.tutorial ? 1.6 : 1);
+    this.pool = poolDef(run.pool);
+    this.dangerTime = (H.dangerTime * (this.tutorial ? 1.6 : 1)) / this.pool.danger;
     this.rng = createRng(`${run.huntSeed}/client`);
-    this.table = spawnTable(run.stage, run.cfg.event?.dietWeights);
+    this.table = spawnTable(run.stage, poolDietWeights(run.pool, run.cfg.event?.dietWeights));
     this.maxTableTier = Math.max(...this.table.map((e) => e.tier));
     this.size = run.size;
     this.xp = run.xp;
@@ -261,7 +309,9 @@ export class HuntScene implements Scene {
       this.nodeCount = { ...this.nodeCount, ...saved.nodes };
       this.dropCount = saved.drops ?? 0;
       this.taken = new Set(saved.taken ?? []);
-      this.pearls = this.nodeCount.oyster * H.oysterPearls + this.nodeCount.chest * H.chestPearls + this.dropCount;
+      this.trophyDone = saved.trophy === true;
+      this.parries = saved.parries ?? 0;
+      this.pearls = this.nodeCount.oyster * H.oysterPearls * this.pool.oyster + this.nodeCount.chest * H.chestPearls + this.dropCount + (this.trophyDone ? H.trophyPearls : 0);
       this.cx = saved.x ?? 0;
       this.cy = saved.y ?? 0;
       this.gained = saved.gained;
@@ -273,14 +323,15 @@ export class HuntScene implements Scene {
 
     this.deep = new Deep(this.info.biome, 6);
     this.ents.sortableChildren = true;
-    this.world.addChild(this.glows, this.ents, this.fx.layer);
-    this.root.addChild(this.deep.root, this.world, this.deep.front, this.dark);
+    this.world.addChild(this.glows, this.ents, this.tele, this.trophyMark, this.fx.layer);
+    this.root.addChild(this.deep.root, this.world, this.deep.front, this.dark, this.compass);
     this.crabGlow = this.makeGlow(BIOME_LOOK[this.info.biome].glow, 150, 0.22);
     this.crab.setLook(this.look());
     this.ents.addChild(this.crab);
     this.crab.hidden = true;
     this.syncChunks();
     for (let i = 0; i < H.initialSpawn; i++) this.spawn(true, i < 15);
+    this.spawnTrophy();
 
     this.canvas = pixi().canvas as HTMLCanvasElement;
     this.canvas.addEventListener('pointerdown', this.onDown);
@@ -394,6 +445,15 @@ export class HuntScene implements Scene {
       const p = spot(80);
       node('glitter', p.x, p.y);
     }
+    // A nest current opens right onto a guarded chest.
+    if (home && this.pool.nest) {
+      const id = `${key}:${n}`;
+      node('chest', -150, 170);
+      if (!this.taken.has(id) && !this.nested.has(key)) {
+        this.nested.add(key);
+        this.spawnGuard(-150, 170);
+      }
+    }
     // Places worth a detour: a pearl bank, or a nest whose owner guards a chest.
     const poi = home ? 1 : rng.next();
     if (poi < 0.07 + rich * 0.04) {
@@ -452,7 +512,7 @@ export class HuntScene implements Scene {
     return Math.hypot(vw / 2, vh / 2) + 50;
   }
 
-  private addCreature(def: CreatureDef, tier: number, x: number, y: number, opts: { stalker?: boolean; home?: { x: number; y: number } } = {}): Creature {
+  private addCreature(def: CreatureDef, tier: number, x: number, y: number, opts: { stalker?: boolean; home?: { x: number; y: number }; trophy?: boolean } = {}): Creature {
     const stalker = opts.stalker === true;
     const scale = (0.62 + def.rank * 0.17 + (this.info.loop > 0 ? 0.05 : 0)) * (stalker ? 1.25 : 1);
     const root = new Container();
@@ -471,7 +531,7 @@ export class HuntScene implements Scene {
     const c: Creature = {
       def, tier, x, y, vx: 0, vy: 0, hp, maxHp: hp, r: 12 * scale, root, body, icon, dir: this.rng.next() * Math.PI * 2,
       think: this.rng.next() * 2, biteT: 0, stunT: 0, slowT: 0, poison: 0, lureT: 0, pullT: 0, dash: 0, flash: 0, ph: this.rng.next() * 6, scale,
-      glow, stalker, home: opts.home ?? null,
+      glow, stalker, home: opts.home ?? null, trophy: opts.trophy === true, windT: 0, windAt: 0,
     };
     this.creatures.push(c);
     return c;
@@ -487,6 +547,35 @@ export class HuntScene implements Scene {
   private spawnGuard(x: number, y: number): void {
     const e = this.predatorDef();
     this.addCreature(e.def, Math.max(e.tier, this.size + 1), x + 30, y + 10, { home: { x, y } });
+  }
+
+  /**
+   * The marked prey waits away from the entry, one size above the crab that came in: grow into it or
+   * wear it down. Its place comes from the hunt seed, so a reload finds it where it was.
+   */
+  private spawnTrophy(): void {
+    const def = CREATURES.find((c) => c.id === this.run.trophyId);
+    if (!def || this.trophyDone || this.tutorial) return;
+    const rng = createRng(`${this.run.huntSeed}/trophy`);
+    const a = rng.next() * Math.PI * 2;
+    const r = 760 + rng.next() * 240;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    const c = this.addCreature(def, this.run.size + 1, x, y, { home: { x, y }, trophy: true });
+    c.glow.tint = 0xffe066;
+    c.glow.width = c.glow.height = 150;
+  }
+
+  private takeTrophy(x: number, y: number): void {
+    if (this.trophyDone) return;
+    this.trophyDone = true;
+    this.pearls += H.trophyPearls;
+    this.fx.ring(x, y, 90, 0xffe066, 0.7);
+    this.fx.emit('fx/spark', x, y - 10, { n: 26, tint: 0xffe066, speed: 170, size: 15, life: 0.9, add: true, up: 40, gravity: 120 });
+    this.fx.text(x, y - 46, `+${H.trophyPearls}`, 0xffe066, 22);
+    sfx('merge_2');
+    haptic('success');
+    this.save();
   }
 
   /** A stalker comes for a crab that stays too long or grows too big: its tier follows the crab. */
@@ -541,8 +630,7 @@ export class HuntScene implements Scene {
   private onUp = (): void => {
     if (!this.target || this.byKeys) return;
     this.target = null;
-    this.hidden = true;
-    sfx('hide', { volume: 0.5 });
+    this.hide();
   };
 
   setPaused(p: boolean): void {
@@ -572,10 +660,11 @@ export class HuntScene implements Scene {
     this.log.push([def.id, tier]);
     this.eatenCount += 1;
     const g = { size: this.size, xp: this.xp };
-    const grew = feed(g, tier, this.mods.xpPct);
+    const grew = feed(g, tier, (1 + this.mods.xpPct / 100) * this.pool.xp * 100 - 100);
     this.size = g.size;
     this.xp = g.xp;
-    this.gained[def.diet] += genesForTier(tier) * heroDef(this.run.cfg.heroId).geneMult * (1 + this.mods.genePct / 100);
+    const swarm = this.run.pool?.kind === 'swarm' && this.run.pool.diet === def.diet ? 1 + this.pool.swarmGenePct / 100 : 1;
+    this.gained[def.diet] += genesForTier(tier) * heroDef(this.run.cfg.heroId).geneMult * (1 + this.mods.genePct / 100) * swarm;
     this.coral += H.coralPerTier * tier;
     this.combo = this.comboT > 0 ? Math.min(12, this.combo + 1) : 0;
     this.comboT = 1.2;
@@ -611,7 +700,7 @@ export class HuntScene implements Scene {
       s.position.set(c.x, c.y);
       s.zIndex = c.y;
       this.ents.addChild(s);
-      this.morsels.push({ def: c.def, tier: c.tier, x: c.x, y: c.y, s, age: 0 });
+      this.morsels.push({ def: c.def, tier: c.tier, x: c.x, y: c.y, s, age: c.trophy ? -1e6 : 0, trophy: c.trophy });
       // Predators carry pearls: a stalker always drops one, other big fauna sometimes.
       if (c.tier > this.size && (c.stalker || this.rng.chance(H.predatorPearlChance))) {
         const ps = sprite('icon/pearl', 0.7);
@@ -766,6 +855,36 @@ export class HuntScene implements Scene {
     if (ok) this.crab.pulseSlot(ab.src);
   }
 
+  /**
+   * A bite is announced: the predator freezes and a ring closes on the crab. Tucking in during the
+   * freeze turns the bite back on the biter; a crab that was already hiding only sits it out.
+   */
+  private resolveBite(c: Creature, inReach: boolean): void {
+    c.windT = 0;
+    if (!inReach) {
+      c.biteT = H.biteInterval * 0.5;
+      return;
+    }
+    if (this.hidden && this.hidAt >= c.windAt) {
+      c.biteT = H.biteInterval;
+      c.stunT = Math.max(c.stunT, H.parryStun);
+      this.parries += 1;
+      this.fx.ring(this.cx, this.cy - 12, 70, 0xc6fff4, 0.5);
+      this.fx.emit('fx/spark', (this.cx + c.x) / 2, (this.cy + c.y) / 2 - 10, { n: 12, tint: 0xc6fff4, speed: 150, size: 13, life: 0.5, add: true });
+      this.fx.addShake(3);
+      this.hurtCreature(c, this.fighter.atk * 2 + this.fighter.thorns, 0xc6fff4);
+      sfx('shield');
+      sfx('crit', { volume: 0.6, pitch: 1.3 });
+      haptic('success');
+      return;
+    }
+    if (this.hidden && !c.stalker) {
+      c.biteT = H.biteInterval * 0.5;
+      return;
+    }
+    this.takeBite(c);
+  }
+
   private takeBite(c: Creature): void {
     c.biteT = H.biteInterval;
     let dmg = H.creatureDmgBase * Math.pow(c.tier, H.creatureDmgPow) * (100 / (100 + this.fighter.armor));
@@ -810,6 +929,8 @@ export class HuntScene implements Scene {
       durationS: Math.round(this.time * 10) / 10,
       hpLost: Math.round((this.run.hp + (this.fighter.maxHp - this.maxHpStart) - Math.max(0, this.hp)) * 100) / 100,
       ko,
+      ...(this.trophyDone ? { trophy: true } : {}),
+      ...(this.parries > 0 ? { parries: this.parries } : {}),
     };
     this.pushHud();
     setTimeout(() => this.onDone(report), ko ? 900 : 250);
@@ -838,12 +959,15 @@ export class HuntScene implements Scene {
     const s: Saved = {
       runId: this.run.id, nonce: this.run.huntNonce, time: this.time, log: this.log, nodes: this.nodeCount, drops: this.dropCount,
       taken: [...this.taken], x: this.cx, y: this.cy, hp: this.hp, size: this.size, xp: this.xp, gained: this.gained,
+      trophy: this.trophyDone, parries: this.parries,
     };
     saveLocal('hunt', s);
   }
 
   private hint(): string | null {
-    if (!this.tutorial) return this.time < 4 && this.run.stage > 1 ? null : null;
+    if (this.parries === 0 && this.run.stage <= 4 && this.creatures.some((c) => c.windT > 0)) this.sawWind = true;
+    if (this.sawWind && this.parries === 0 && this.run.stage <= 4 && (this.run.stats.parries ?? 0) === 0 && this.creatures.some((c) => c.tier > this.size && Math.hypot(c.x - this.cx, c.y - this.cy) < 130)) return 'hunt.hint.parry';
+    if (!this.tutorial) return null;
     if (this.moved < 80) return 'hunt.hint.move';
     if (this.eatenCount < 3) return 'hunt.hint.eat';
     if (this.sawBig && this.time < 60 && this.hp < this.fighter.maxHp) return 'hunt.hint.hide';
@@ -858,6 +982,7 @@ export class HuntScene implements Scene {
       danger: this.danger(), time: this.time, canLeave: this.time >= H.minLeaveTime && !this.finished,
       gained: { ...this.gained }, pearls: this.pearls, coral: Math.floor(this.coral), hint: this.hint(), paused: this.paused, eaten: this.eatenCount,
       dist: Math.round(Math.hypot(this.cx, this.cy) / 40), stalkers: this.creatures.filter((c) => c.stalker && c.hp > 0).length,
+      trophy: this.trophyDone ? 'done' : this.run.trophyId && !this.tutorial ? 'out' : null, parries: this.parries,
     };
   }
 
@@ -942,6 +1067,8 @@ export class HuntScene implements Scene {
     }
 
     // Creatures.
+    this.tele.clear();
+    let trophy: { x: number; y: number } | null = null;
     for (let i = this.creatures.length - 1; i >= 0; i--) {
       const c = this.creatures[i] as Creature;
       if (c.hp <= 0) {
@@ -975,7 +1102,15 @@ export class HuntScene implements Scene {
       let ay = Math.sin(c.dir);
       if (c.stunT > 0) {
         c.stunT -= dt;
+        c.windT = 0;
         sp = 0;
+      } else if (c.windT > 0) {
+        // Frozen, jaws open: the bite lands when the ring closes.
+        c.windT -= dt;
+        sp = 0;
+        ax = dx / dist;
+        ay = dy / dist;
+        if (c.windT <= 0) this.resolveBite(c, dist < crabR + c.r + 26);
       } else if (c.pullT > 0) {
         c.pullT -= dt;
         ax = dx / dist;
@@ -1033,7 +1168,7 @@ export class HuntScene implements Scene {
       c.x += ax * sp * dt;
       c.y += ay * sp * dt;
       // Fauna left far behind is gone for good; stalkers and nest guards stay.
-      if (dist > despawn && !c.stalker && !c.home) {
+      if (dist > despawn && !c.stalker && !c.home && !c.trophy) {
         c.hp = 0;
         continue;
       }
@@ -1045,10 +1180,11 @@ export class HuntScene implements Scene {
           if (edible && dist < reach + c.r * 0.6) {
             c.hp = 0;
             this.eat(c.def, c.tier, c.x, c.y);
+            if (c.trophy) this.takeTrophy(c.x, c.y);
             continue;
           }
-          if (!edible && c.biteT <= 0 && c.stunT <= 0) this.takeBite(c);
-        } else if (c.stalker && !edible && c.biteT <= 0 && c.stunT <= 0) this.takeBite(c);
+          if (!edible && c.biteT <= 0 && c.stunT <= 0 && c.windT <= 0) this.windUp(c);
+        } else if (c.stalker && !edible && c.biteT <= 0 && c.stunT <= 0 && c.windT <= 0) this.windUp(c);
       }
 
       // Visuals.
@@ -1059,7 +1195,12 @@ export class HuntScene implements Scene {
       const face = Math.abs(ax) > 0.15 ? (ax > 0 ? 1 : -1) : Math.sign(c.body.scale.x) || 1;
       const wob = 1 + Math.sin(this.time * 6 + c.ph) * 0.04;
       c.body.scale.set((face * c.scale * wob) / 2, (c.scale / wob) / 2);
-      c.body.tint = c.flash > 0 ? 0xff8080 : c.stalker ? 0xffb4b4 : this.info.biome === 'trench' ? 0xd8c0ff : 0xffffff;
+      if (c.windT > 0) {
+        const k = 1 - c.windT / H.biteWindup;
+        this.tele.circle(this.cx, this.cy - 12, crabR + 10 + (1 - k) * 46).stroke({ color: 0xff5a5a, width: 2 + k * 2, alpha: 0.35 + k * 0.6 });
+      }
+      if (c.trophy) trophy = c;
+      c.body.tint = c.windT > 0 ? 0xffd0d0 : c.flash > 0 ? 0xff8080 : c.stalker ? 0xffb4b4 : this.info.biome === 'trench' ? 0xd8c0ff : 0xffffff;
       c.glow.position.set(c.x, c.y + c.body.y * 0.5);
       c.glow.alpha = c.stalker || (!edible && c.home) ? 0.34 + 0.2 * Math.sin(this.time * 7 + c.ph) : edible ? 0.26 + 0.08 * Math.sin(this.time * 2 + c.ph) : 0.12;
       if (!edible && !c.stalker) c.glow.tint = 0xff6a5a;
@@ -1082,10 +1223,14 @@ export class HuntScene implements Scene {
         m.x += (dx / d) * v;
         m.y += (dy / d) * v;
       }
+      if (m.trophy) trophy = m;
       m.s.position.set(m.x, m.y + Math.sin(m.age * 5) * 2);
       m.s.zIndex = m.y;
       if ((!this.hidden && d < crabR + 6) || m.age > 25) {
-        if (m.age <= 25) this.eat(m.def, m.tier, m.x, m.y);
+        if (m.age <= 25) {
+          this.eat(m.def, m.tier, m.x, m.y);
+          if (m.trophy) this.takeTrophy(m.x, m.y);
+        }
         this.ents.removeChild(m.s);
         m.s.destroy();
         this.morsels.splice(i, 1);
@@ -1140,8 +1285,8 @@ export class HuntScene implements Scene {
         this.fx.ring(n.x, n.y - 12, 40, tint, 0.45);
         if (n.kind === 'oyster') {
           n.s.texture = tex('node/oyster_open');
-          this.pearls += H.oysterPearls;
-          this.fx.text(n.x, n.y - 40, `+${H.oysterPearls}`, 0xfdf7ff, 18);
+          this.pearls += H.oysterPearls * this.pool.oyster;
+          this.fx.text(n.x, n.y - 40, `+${H.oysterPearls * this.pool.oyster}`, 0xfdf7ff, 18);
           sfx('collect_pearl');
         } else if (n.kind === 'coral') {
           n.s.alpha = 0.3;
@@ -1174,10 +1319,11 @@ export class HuntScene implements Scene {
     // Stalkers: they come sooner for a crab that has outgrown the pool, and never stop coming.
     const pressure = Math.max(dangerRaw, this.size >= this.maxTableTier ? 1 : 0);
     const stalkersAlive = this.creatures.reduce((nAlive, c) => nAlive + (c.stalker && c.hp > 0 ? 1 : 0), 0);
-    if (pressure >= H.stalkerFrom && !(this.tutorial && this.time < 60)) {
+    const stalkerFrom = H.stalkerFrom * this.pool.stalkerFrom;
+    if (pressure >= stalkerFrom && !(this.tutorial && this.time < 60)) {
       this.stalkerT -= dt;
       if (this.stalkerT <= 0 && stalkersAlive < H.stalkerMaxAlive) {
-        const k = Math.min(1, (pressure - H.stalkerFrom) / 1.4);
+        const k = Math.min(1, (pressure - stalkerFrom) / 1.4);
         this.stalkerT = (H.stalkerInterval[0] as number) + ((H.stalkerInterval[1] as number) - (H.stalkerInterval[0] as number)) * k;
         this.spawnStalker();
       }
@@ -1209,6 +1355,7 @@ export class HuntScene implements Scene {
     const sh = this.fx.shake;
     this.world.position.set((-this.camX + (Math.random() - 0.5) * sh) * ZOOM, (-this.camY + (Math.random() - 0.5) * sh) * ZOOM);
     this.dark.alpha = BIOME_LOOK[this.info.biome].dark + danger * 0.3;
+    this.drawTrophy(trophy);
 
     if (this.hp <= 0) {
       this.fx.addShake(8);
@@ -1227,7 +1374,49 @@ export class HuntScene implements Scene {
     }
   }
 
+  private windUp(c: Creature): void {
+    c.windT = H.biteWindup;
+    c.windAt = this.time;
+    sfx('stun', { volume: 0.25, pitch: 1.5 });
+  }
+
+  /** A halo over the marked prey, or an arrow at the screen edge pointing its way. */
+  private drawTrophy(at: { x: number; y: number } | null): void {
+    this.trophyMark.clear();
+    this.compass.clear();
+    if (!at || this.trophyDone) return;
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
+    const sx = (at.x - this.camX) * ZOOM;
+    const sy = (at.y - this.camY) * ZOOM;
+    const pad = 34;
+    if (sx > pad && sx < this.w - pad && sy > pad + 60 && sy < this.h - pad - 70) {
+      this.trophyMark.circle(at.x, at.y - 6, 26 + pulse * 4).stroke({ color: 0xffe066, width: 2, alpha: 0.55 + pulse * 0.35 });
+      this.trophyMark.poly([at.x, at.y - 44, at.x - 6, at.y - 54, at.x + 6, at.y - 54]).fill({ color: 0xffe066, alpha: 0.9 });
+      return;
+    }
+    const ox = this.w / 2;
+    const oy = this.h * 0.52;
+    const a = Math.atan2(sy - oy, sx - ox);
+    // Slide along the screen edge, clear of the HUD at the top and the button at the bottom.
+    const hx = this.w / 2 - 26;
+    const top = oy - 96;
+    const bottom = this.h - oy - 96;
+    const kx = Math.abs(Math.cos(a)) > 1e-3 ? hx / Math.abs(Math.cos(a)) : Infinity;
+    const ky = Math.abs(Math.sin(a)) > 1e-3 ? (Math.sin(a) < 0 ? top : bottom) / Math.abs(Math.sin(a)) : Infinity;
+    const k = Math.min(kx, ky);
+    const px = ox + Math.cos(a) * k;
+    const py = oy + Math.sin(a) * k;
+    const tip = 13 + pulse * 3;
+    const wing = 2.5;
+    this.compass.circle(px, py, 15).fill({ color: 0x021016, alpha: 0.7 }).stroke({ color: 0xffe066, width: 1.5, alpha: 0.8 });
+    this.compass
+      .poly([px + Math.cos(a) * tip, py + Math.sin(a) * tip, px + Math.cos(a + wing) * 8, py + Math.sin(a + wing) * 8, px + Math.cos(a - wing) * 8, py + Math.sin(a - wing) * 8])
+      .fill({ color: 0xffe066 });
+  }
+
   resize(w: number, h: number): void {
+    this.w = w;
+    this.h = h;
     this.deep.resize(w, h);
     this.dark.clear().rect(0, 0, w, h).fill({ color: 0x02040f });
     // A pool restored while paused never reaches update(), so the veil gets its level here too.
