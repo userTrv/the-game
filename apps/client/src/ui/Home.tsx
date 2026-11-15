@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals';
 import {
   ALMANAC_REWARD_MULT, BUILDING_DEFS, BUILDINGS, CORF_RATE_PER_HOUR, HEROES, LIGHTHOUSE_STAGES, MILESTONES, QUEST_BY_ID, SHELLS, TALENTS, TENANTS, CREATURES, GUARDIANS,
-  milestoneProgress, talentCost, unlockedHeroes, upgradeBlocker, upgradeCost,
+  featDone, milestoneProgress, talentCost, unlockedHeroes, upgradeBlocker, upgradeCost,
   type BuildingId, type PlayerView,
 } from '@shellter/shared';
 import type { JSX } from 'preact';
@@ -128,7 +128,7 @@ export function HeroesSheet(): JSX.Element | null {
               <Spr id={`crab/${h.id}/body`} size={54} style={{ filter: ok ? undefined : 'grayscale(1) brightness(0.6)' }} />
               <div class="grow">
                 <b>{t(`hero.${h.id}`)}</b>
-                <div class="muted tiny">{ok ? t(`hero.${h.id}.desc`) : t('hero.locked', { n: h.unlock })}</div>
+                <div class="muted tiny">{ok ? t(`hero.${h.id}.desc`) : h.feat && !featDone(p.profile, h.feat) ? t(`feat.${h.feat}`) : t('hero.locked', { n: h.unlock })}</div>
               </div>
               {ok ? <Btn class={`sm ${sel ? 'ghost' : 'ok'}`} id={`hero-${h.id}`} disabled={sel} onClick={() => void meta(() => api.hero(h.id))}>{sel ? t('hero.selected') : t('hero.select')}</Btn> : <Spr id="icon/lock" size={26} />}
             </div>
@@ -217,10 +217,14 @@ export function AlmanacSheet(): JSX.Element | null {
             }) : null}
             {tab.value === 'tenants' ? TENANTS.map((x) => {
               const s = al.tenants[x.id] ?? 0;
+              const feat = x.feat && !featDone(p.profile, x.feat) ? x.feat : null;
+              if (feat) return <button class="cell unknown feat" key={x.id} onClick={() => showToast(t(`feat.${feat}`))}><Spr id={`tenant/${x.id}`} size={40} /><Ico id="lock" size={16} /><span>{t(`feat.${feat}`)}</span></button>;
               return <div class={`cell ${s ? '' : 'unknown'}`} key={x.id} title={s ? tenantText(x.id, 1) : ''}><Spr id={`tenant/${x.id}`} size={40} /><span>{s ? name('tenant', x.id) : t('almanac.unknown')}</span>{s ? <Stars n={s} /> : null}</div>;
             }) : null}
             {tab.value === 'shells' ? SHELLS.map((x) => {
               const ok = al.shells.includes(x.id);
+              const feat = x.feat && !featDone(p.profile, x.feat) ? x.feat : null;
+              if (feat) return <button class="cell unknown feat" key={x.id} onClick={() => showToast(t(`feat.${feat}`))}><Spr id={`shell/${x.id}`} size={48} /><Ico id="lock" size={16} /><span>{t(`feat.${feat}`)}</span></button>;
               return <div class={`cell ${ok ? '' : 'unknown'}`} key={x.id}><Spr id={`shell/${x.id}`} size={48} /><span>{ok ? name('shell', x.id) : t('almanac.unknown')}</span></div>;
             }) : null}
             {tab.value === 'guardians' ? GUARDIANS.map((x) => {

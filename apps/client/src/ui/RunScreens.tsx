@@ -1,6 +1,6 @@
 import { useSignal } from '@preact/signals';
 import {
-  BAL, CHAPTER_STAGES, DIETS, duelPearls, familyCounts, frontCount, guardianDef, heroDef, mutationDef, orderPrice, POOLS, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
+  BAL, CHAPTER_STAGES, DIETS, duelPearls, HEROES, SHELLS, TENANTS, familyCounts, frontCount, guardianDef, heroDef, mutationDef, orderPrice, POOLS, ratePower, buildFighter, rerollCost, setLevel, SET_BONUSES,
   SET_THRESHOLDS, shellDef, slotCount, slotLinks, stageInfo, tenantDef, TROPHY_LOSS, TROPHY_WIN, wouldMerge, xpNeed,
   type Diet, type Enemy, type GuardianAbility, type Offer, type Pool, type PublicRun, type SlotLinks, type TenantInst,
 } from '@shellter/shared';
@@ -906,6 +906,13 @@ export function ResultView(): JSX.Element | null {
         <div class="muted small">
           {t('result.stage', { n: e.last.stats.maxStage })} · {t('result.eaten', { n: e.last.stats.eatenTotal })} · {t('result.merges', { n: e.last.stats.merges[0] + e.last.stats.merges[1] })}
         </div>
+        {(s.newFeats ?? []).map((f) => (
+          <div class="row featrow" key={f}>
+            {HEROES.filter((h) => h.feat === f).map((h) => <span class="row" key={h.id}><Spr id={`crab/${h.id}/body`} size={30} /><b>{t(`hero.${h.id}`)}</b></span>)}
+            {TENANTS.filter((x) => x.feat === f).map((x) => <span class="row" key={x.id}><Spr id={`tenant/${x.id}`} size={30} /><b>{name('tenant', x.id)}</b></span>)}
+            {SHELLS.filter((x) => x.feat === f).map((x) => <span class="row" key={x.id}><Spr id={`shell/${x.id}`} size={30} /><b>{name('shell', x.id)}</b></span>)}
+          </div>
+        ))}
         {fresh > 0 ? <div class="small">{t('result.new', { n: fresh })}</div> : null}
         {e.questsCompleted.length > 0 ? <div class="small" style={{ color: 'var(--green)' }}>✓ {t('result.quests', { n: e.questsCompleted.length })}</div> : null}
         {s.chapterCleared ? <div class="small" style={{ color: 'var(--gold)' }}>{t('result.chapter')}</div> : null}

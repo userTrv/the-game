@@ -343,3 +343,7 @@ input[type='text'] { font: inherit; color: inherit; background: rgba(2, 12, 18, 
 .current:disabled .bub { animation: none; }
 #ui > .screen.pass .ahead, #ui > .screen.pass .ahead * { pointer-events: auto; }
 @media (hover: hover) { .current:not(:disabled):hover { transform: translateY(-3px); } .orb:hover { border-color: var(--accent); } }
+.cell.feat { color: var(--muted); font: inherit; font-size: 9.5px; }
+.cell.feat .ico { position: absolute; top: 6px; right: 6px; color: var(--gold); }
+.featrow { gap: 8px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--gold); color: var(--gold); animation: pop-in 0.3s ease-out; }
+.featrow .row { gap: 6px; }

@@ -2,6 +2,13 @@ import {
   applyRunAction,
   BAL,
   feed,
+  FEATS,
+  guardianDef,
+  poolDef,
+  poolDietWeights,
+  ratePower,
+  runFighter,
+  stageInfo,
   BUILDINGS,
   createRng,
   DIETS,
@@ -18,6 +25,7 @@ import {
   wouldMerge,
   type Diet,
   type Offer,
+  type Pool,
   type Profile,
   type Rng,
   type RunAction,
@@ -53,6 +61,7 @@ export const PROFILES: Record<string, (now: number) => Profile> = {
     for (const b of BUILDINGS) p.buildings[b] = maxLevel(b);
     // The chapter, not the endless mode: the lighthouse stops at stage 12.
     p.buildings.lighthouse = 3;
+    p.feats = FEATS.map((f) => f.id);
     return p;
   },
 };
@@ -78,7 +87,8 @@ const HUNT_SECONDS = 40;
 
 /** A pool played by an average player: eats most of what it can, takes some bites from big fauna. */
 function hunt(state: RunState, policy: Policy, rng: Rng): RunAction {
-  const table = spawnTable(state.stage, state.cfg.event?.dietWeights);
+  const table = spawnTable(state.stage, poolDietWeights(state.pool, state.cfg.event?.dietWeights));
+  const pool = poolDef(state.pool);
   const h = BAL.hunt;
   const spawned = h.initialSpawn + (((h.spawnRate[0] as number) + (h.spawnRate[1] as number)) / 2) * HUNT_SECONDS;
   // Picky eaters pass by food of other families, so they get fewer bites overall.
@@ -100,15 +110,20 @@ function hunt(state: RunState, policy: Policy, rng: Rng): RunAction {
     }
     const e = edible[rng.weightedIndex(edible.map((x) => x.weight * (policy.diets.includes(x.def.diet) ? 4 : 1)))] as (typeof table)[number];
     log.push([e.def.id, e.tier]);
-    feed(g, e.tier, 0);
+    feed(g, e.tier, pool.xp * 100 - 100);
     size = g.size;
   }
   const edibleShare = attempts > 0 ? 1 - misses / attempts : 1;
   const danger = 1 - edibleShare;
-  const hpLost = maxHpOf(state) * (0.05 + 0.3 * danger) * (0.5 + rng.next());
+  // Wilder currents bite harder; an average player parries a bite or two and finds the marked prey now and then.
+  const hpLost = maxHpOf(state) * (0.05 + 0.3 * danger) * (0.5 + rng.next()) * (0.6 + 0.4 * pool.danger) * (pool.stalkerFrom < 1 ? 1.2 : 1);
+  const chest = pool.nest ? (rng.chance(0.7) ? 1 : 0) : rng.chance(0.3) ? 1 : 0;
   return {
     type: 'hunt_done',
-    report: { log, nodes: { oyster: rng.int(2, 4), coral: rng.int(2, 4), glitter: rng.chance(0.4) ? 1 : 0, chest: rng.chance(0.3) ? 1 : 0 }, drops: rng.int(0, 2), durationS: HUNT_SECONDS, hpLost, ko: false },
+    report: {
+      log, nodes: { oyster: rng.int(2, 4), coral: rng.int(2, 4), glitter: rng.chance(0.4) ? 1 : 0, chest }, drops: rng.int(0, 2), durationS: HUNT_SECONDS, hpLost, ko: false,
+      ...(rng.chance(0.3) ? { trophy: true } : {}), parries: rng.int(0, 2),
+    },
   };
 }
 
@@ -124,9 +139,59 @@ function score(state: RunState, offer: Offer, policy: Policy): number {
   const def = tenantDef(offer.id);
   let s = 1 + def.rarity + (offer.star - 1) * 3;
   if (policy.diets.length === 0 || def.families.some((f) => policy.diets.includes(f))) s += 3;
+  if (def.link) s += 1;
+  if (nextGuardianWeak(state).includes(def.families[0])) s += 1.5;
   if (wouldMerge(state, offer.id, offer.star)) s += 6;
   else if (state.slots.some((t) => t && t.id === offer.id && t.star === offer.star)) s += 2;
   return s;
+}
+
+function nextGuardianWeak(state: RunState): readonly Diet[] {
+  let stage = (state.camp?.after ?? state.stage) + 1;
+  while (stage <= state.cfg.maxStage && stageInfo(stage).kind !== 'guardian') stage += 1;
+  const id = stage <= state.cfg.maxStage ? stageInfo(stage).guardianId : undefined;
+  return id ? guardianDef(id).weak : [];
+}
+
+/** Shuffles tenants between cells while a swap makes the build stronger: links and rows both count. */
+function arrange(state: RunState): RunState {
+  for (let guard = 0; guard < 12; guard++) {
+    const base = ratePower(runFighter(state));
+    let best: { from: number; to: number; p: number } | null = null;
+    for (let from = 0; from < state.slots.length; from++) {
+      if (!state.slots[from]) continue;
+      for (let to = 0; to < state.slots.length; to++) {
+        if (to === from || (state.slots[to] && to < from)) continue;
+        const slots = state.slots.slice();
+        [slots[from], slots[to]] = [slots[to] ?? null, slots[from] ?? null];
+        const p = ratePower(runFighter({ ...state, slots }));
+        if (p > base * 1.01 && (!best || p > best.p)) best = { from, to, p };
+      }
+    }
+    if (!best) break;
+    state = applyRunAction(state, { type: 'move', from: best.from, to: best.to }).state;
+  }
+  return state;
+}
+
+/** Which current to dive into: its own swarm first, then pearls; a hurt crab takes the calm one. */
+function choosePath(state: RunState, policy: Policy, rng: Rng): number | undefined {
+  const paths: Pool[] = state.camp?.paths ?? [];
+  if (paths.length === 0) return undefined;
+  if (policy.random) return rng.int(0, paths.length - 1);
+  const hurt = state.hp < maxHpOf(state) * 0.5;
+  const value = (p: Pool): number => {
+    if (p.kind === 'swarm') return policy.diets.length === 0 || (p.diet && policy.diets.includes(p.diet)) ? 5 : 1.5;
+    if (p.kind === 'calm') return hurt ? 6 : 2;
+    if (p.kind === 'pearl') return hurt ? 1 : 4;
+    if (p.kind === 'dark') return hurt ? 0 : 3.5;
+    return hurt ? 0.5 : 3;
+  };
+  let best = 0;
+  paths.forEach((p, i) => {
+    if (value(p) > value(paths[best] as Pool)) best = i;
+  });
+  return best;
 }
 
 /** Slot argument for a tenant offer: a free slot, a merge, or the weakest tenant if the new one is better. */
@@ -200,7 +265,7 @@ function campActions(state: RunState, policy: Policy, rng: Rng): RunState {
     }
     break;
   }
-  return state;
+  return policy.random ? state : arrange(state);
 }
 
 export function simulateRun(seed: string, policy: Policy, profile: Profile, heroId = 'hermit', onBattle?: (before: RunState, won: boolean) => void): RunOutcome {
@@ -218,7 +283,8 @@ export function simulateRun(seed: string, policy: Policy, profile: Profile, hero
         if (after % 3 === 0 && bank[after] === undefined) {
           bank[after] = Math.floor(state.loot.coral + state.pearls * BAL.pearlToCoral);
         }
-        state = applyRunAction(state, after + 1 > state.cfg.maxStage ? { type: 'carry_out' } : { type: 'descend' }).state;
+        const path = choosePath(state, policy, rng);
+        state = applyRunAction(state, after + 1 > state.cfg.maxStage ? { type: 'carry_out' } : path !== undefined ? { type: 'descend', path } : { type: 'descend' }).state;
         break;
       }
       case 'battle': {
