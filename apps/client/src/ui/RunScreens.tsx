@@ -237,6 +237,10 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
     );
   };
   // The bubble hangs over its slot and stays inside the panel.
+  // The ghost is placed inside the strip: the panel's blur makes it the origin for fixed children too.
+  const box = wrap.current?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0 };
+  // Screen pixels to layout pixels, in case an ancestor is scaled (screen transitions).
+  const zoom = box.width > 0 && wrap.current ? wrap.current.offsetWidth / box.width : 1;
   const anchor = props.open !== null ? document.getElementById(`slot-${props.open}`) : null;
   const W = wrap.current?.clientWidth ?? 320;
   const tw = Math.min(300, W);
@@ -250,7 +254,7 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
       </div>
       <div class="slots">{r.slots.map(cell)}</div>
       {props.tip && anchor ? <div class="tip col" id="tenant-tip" style={{ left: `${left}px`, width: `${tw}px`, '--ax': `${cx - left}px` }}>{props.tip}</div> : null}
-      {d && held ? <span class="drag-ghost" style={{ left: `${d.x}px`, top: `${d.y}px` }}><Spr id={`tenant/${held.id}`} size={46} /></span> : null}
+      {d && held ? <span class="drag-ghost" style={{ left: `${(d.x - box.left) * zoom}px`, top: `${(d.y - box.top) * zoom}px` }}><Spr id={`tenant/${held.id}`} size={46} /></span> : null}
     </div>
   );
 }
