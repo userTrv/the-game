@@ -5,7 +5,7 @@ import { Container, Graphics, Sprite as PixiSprite } from 'pixi.js';
 import { sprite } from '../gfx/assets';
 import { CrabView, type CrabLook } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';
-import { VIEW_W, type Scene } from '../gfx/stage';
+import { type Scene } from '../gfx/stage';
 import { BIOME_LOOK, Deep, glowTexture } from '../gfx/deep';
 import { sfx } from '../sound';
 import { haptic, player, type BattleView } from '../state';
@@ -56,6 +56,7 @@ export class BattleScene implements Scene {
   private frenzy = false;
   private endT = 0;
   private baseY = 520;
+  private w = 390;
   private hudT = 0;
   private events: BattleEvent[];
 
@@ -94,7 +95,9 @@ export class BattleScene implements Scene {
   }
 
   private pos(side: 0 | 1): { x: number; y: number } {
-    return { x: side === 0 ? 96 : VIEW_W - 104, y: this.baseY };
+    // Fighters keep their phone distance on wide screens instead of drifting to the edges.
+    const mid = this.w / 2;
+    return { x: side === 0 ? mid - Math.min(mid - 96, 150) : mid + Math.min(mid - 104, 160), y: this.baseY };
   }
 
   private center(side: 0 | 1): { x: number; y: number } {
@@ -287,12 +290,13 @@ export class BattleScene implements Scene {
 
   resize(w: number, h: number): void {
     this.water.resize(w, h);
+    this.w = w;
     this.baseY = Math.round(h * 0.6);
     const look = BIOME_LOOK[this.view.kraken ? 'abyss' : stageInfo(this.view.stage).biome];
     // No floor in open water: two pools of light mark where the fighters hang.
     this.floor.clear();
-    this.floor.ellipse(96, this.baseY + 8, 92, 26).fill({ color: look.glow, alpha: 0.1 });
-    this.floor.ellipse(w - 104, this.baseY + 8, 120, 32).fill({ color: 0xff6a5a, alpha: 0.08 });
+    this.floor.ellipse(this.pos(0).x, this.baseY + 8, 92, 26).fill({ color: look.glow, alpha: 0.1 });
+    this.floor.ellipse(this.pos(1).x + 8, this.baseY + 8, 120, 32).fill({ color: 0xff6a5a, alpha: 0.08 });
   }
 
   destroy(): void {
@@ -363,8 +367,9 @@ export class ShowcaseScene implements Scene {
     this.pool.visible = this.showCrab;
     this.pool.tint = look.glow;
     this.pool.position.set(w / 2, fy + 4);
-    this.pool.width = w * 1.25;
-    this.pool.height = w * 1.05;
+    const pw = Math.min(w, 430);
+    this.pool.width = pw * 1.25;
+    this.pool.height = pw * 1.05;
     this.crab.position.set(w / 2 + 18, fy + 22);
     this.crab.scale.set(this.scaleK);
   }

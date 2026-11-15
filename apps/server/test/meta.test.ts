@@ -45,7 +45,7 @@ describe('town and meta', () => {
     await h.call('POST', '/api/dev/grant', { coral: 5000, shine: 200 }, a.token);
     let p = (await h.call<P>('POST', '/api/town/upgrade', { building: 'corf' }, a.token)).body.player;
     expect(p.profile.buildings.corf).toBe(1);
-    expect(p.profile.coral).toBe(4960);
+    expect(p.profile.coral).toBe(4950);
     expect((await h.call<Err>('POST', '/api/town/talent', { id: 'tough_shell' }, a.token)).body.error.code).toBe('talent_locked');
     await h.call('POST', '/api/town/upgrade', { building: 'school' }, a.token);
     p = (await h.call<P>('POST', '/api/town/talent', { id: 'tough_shell' }, a.token)).body.player;

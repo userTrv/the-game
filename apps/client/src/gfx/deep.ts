@@ -291,8 +291,9 @@ export class Deep {
     // Light shafts span the whole screen and dissolve towards the bottom instead of ending abruptly.
     const steps = 14;
     const len = h * 0.92;
-    this.rays.children.forEach((r) => {
+    this.rays.children.forEach((r, i) => {
       const g = r as Graphics;
+      g.x = (0.05 + i / 4) * w;
       g.clear();
       for (let s = 0; s < steps; s++) {
         const a = s / steps;

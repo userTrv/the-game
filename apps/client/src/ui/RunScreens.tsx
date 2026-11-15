@@ -16,6 +16,9 @@ import { sfx } from '../sound';
 import { act, battle, busy, ended, haptic, lastEvents, meta, panel, player, run, screen, screenForRun, showToast, track } from '../state';
 import { abilityText, Bar, Btn, DietIcon, flyIcons, Ico, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
 
+/** Hints that mention a finger have a mouse wording for desktop. */
+const MOUSE = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
+const MOUSE_HINTS = new Set(['hunt.hint.move', 'hunt.hint.hide']);
 const DIET_STATUS: Record<string, string> = { poison: '☠\uFE0E', blind: '◌', stun: 'ϟ', weak: '▾', slow: '≈', mark: '◎' };
 
 // --- Hunt HUD -------------------------------------------------------------------------------------
@@ -50,7 +53,7 @@ export function HuntHudView(): JSX.Element | null {
           {h.dist >= 5 ? <span class="chip tiny" id="hunt-dist">{h.dist} {t('hunt.m')}</span> : null}
         </div>
       </div>
-      {h.hint ? <div class="hint shadow-text" id="hunt-hint">{t(h.hint)}</div> : h.danger > 0.66 && h.time % 12 < 4 ? <div class="hint shadow-text">{t('hunt.danger')}</div> : null}
+      {h.hint ? <div class="hint shadow-text" id="hunt-hint">{t(MOUSE && MOUSE_HINTS.has(h.hint) ? `${h.hint}.mouse` : h.hint)}</div> : h.danger > 0.66 && h.time % 12 < 4 ? <div class="hint shadow-text">{t('hunt.danger')}</div> : null}
       <div class="grow" />
       <div class="row center">
         <Btn class={`go big ${h.canLeave ? '' : 'ghost'}`} id="hunt-leave" disabled={!h.canLeave} onClick={() => hunt()?.leave()}>
@@ -585,7 +588,7 @@ export function BattleView(): JSX.Element | null {
         </div>
         <div class="chip" style={{ marginTop: '14px' }}>{h.time.toFixed(0)}</div>
         <div class="side r">
-          <b class="shadow-text">{b.kraken ? t('guardian.kraken') : enemyName(b.enemy)}</b>
+          <b class="shadow-text" style={boss ? { color: 'var(--gold)' } : undefined}>{b.kraken ? t('guardian.kraken') : enemyName(b.enemy)}</b>
           <Bar value={h.hp[1]} max={h.max[1]} shield={h.shield[1]} kind="red" label={b.kraken ? '∞' : `${Math.ceil(h.hp[1])}`} />
           <div class="status">{h.status[1].map((s) => <span key={s}>{DIET_STATUS[s] ?? ''}</span>)}{b.enemy.kind === 'ghost' ? <span class="tiny muted">{t('battle.ghost')}</span> : null}</div>
         </div>

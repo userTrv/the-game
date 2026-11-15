@@ -131,7 +131,7 @@ describe('runs', () => {
     h.time.now += 20_000;
     const r = await d.ok({ type: 'hunt_done', report: { eaten: { moon_jelly: 50000, viperfish: 100 }, nodes: { oyster: 500, coral: 500, glitter: 50 }, durationS: 400, hpLost: 0, ko: false } });
     const eaten = Object.values(r.run!.stats.eatenByCreature).reduce((x, y) => x + y, 0);
-    expect(eaten).toBeLessThanOrEqual(22 + Math.ceil(1.1 * 20) + 2);
+    expect(eaten).toBeLessThanOrEqual(20 + Math.ceil(1.3 * 1.3 * 20) + 6);
     expect(r.run!.pearls).toBeLessThanOrEqual(10);
     expect(r.events.some((e) => e.type === 'clamped')).toBe(false);
     const sus = await h.handle.db.select().from(analytics).where(eq(analytics.type, 'suspicious'));

@@ -103,7 +103,7 @@ h1, h2, h3, p { margin: 0; }
 .boot .track { width: 200px; }
 
 /* Hunt HUD */
-.hud-top { display: flex; gap: 8px; align-items: flex-start; }
+.hud-top { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
 .hud-left { flex: 1; display: flex; flex-direction: column; gap: 5px; max-width: 210px; }
 .genes { display: flex; gap: 4px; flex-wrap: wrap; }
 .gene { display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px 2px 3px; border-radius: 999px; background: rgba(4, 20, 28, 0.6); border: 1px solid var(--line); font-size: 12px; font-weight: 800; }
@@ -169,8 +169,8 @@ h1, h2, h3, p { margin: 0; }
 /* Home */
 .topbar { display: flex; align-items: center; gap: 6px; }
 /* Shelter: the shell cutaway is the town; chambers are the buildings. */
-.shelter { flex: 1; min-height: 0; display: grid; place-items: center; margin: 0 -12px; }
-.shelter-art { position: relative; height: 100%; max-width: 100%; aspect-ratio: 781 / 1400; background: center / cover no-repeat; -webkit-mask-image: radial-gradient(ellipse 62% 56% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 62% 56% at 50% 50%, #000 78%, transparent 100%); animation: drift 7s ease-in-out infinite; }
+.shelter { flex: 1; min-height: 0; display: grid; place-items: center; margin: 0 -12px; -webkit-mask-image: linear-gradient(to bottom, transparent 1%, #000 9%, #000 91%, transparent 99%); mask-image: linear-gradient(to bottom, transparent 1%, #000 9%, #000 91%, transparent 99%); }
+.shelter-art { position: relative; height: 100%; max-width: 100%; aspect-ratio: 781 / 1400; background: center / cover no-repeat; -webkit-mask-image: linear-gradient(to right, transparent 1%, #000 15%, #000 85%, transparent 99%); mask-image: linear-gradient(to right, transparent 1%, #000 15%, #000 85%, transparent 99%); animation: drift 7s ease-in-out infinite; }
 @keyframes drift { 0%, 100% { transform: translateY(-4px); } 50% { transform: translateY(5px); } }
 .room { position: absolute; width: 21%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; }
 .room:active { background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 70%); }
@@ -211,7 +211,28 @@ input[type='text'] { font: inherit; color: inherit; background: rgba(2, 12, 18, 
 .mock-ad { position: fixed; inset: 0; z-index: 99; display: grid; place-items: center; background: #111; color: #fff; font-size: 64px; font-weight: 800; }
 
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
-@media (min-width: 560px) { #stage, #ui { left: 50%; right: auto; width: 480px; transform: translateX(-50%); } body { background: #010b0f; } }
+/* Wide screens: the scene fills the window, the interface stays a readable column, sheets become dialogs. */
+@media (min-width: 720px) {
+  .screen { padding-left: max(16px, calc(50% - 300px)); padding-right: max(16px, calc(50% - 300px)); padding-top: 16px; padding-bottom: 20px; }
+  #hunt { padding-left: max(16px, calc(50% - 520px)); padding-right: max(16px, calc(50% - 520px)); }
+  .shelter { margin: 0; }
+  .sheet-back { justify-content: center; align-items: center; padding: 24px; }
+  .sheet, .sheet-back.mid .sheet { width: min(560px, 100%); max-height: min(88%, 760px); border-radius: 22px; border-bottom: 1px solid var(--line); padding-bottom: 16px; animation: pop-in 0.22s ease-out; }
+  .toast { bottom: 110px; }
+}
+@media (hover: hover) {
+  .btn:hover { box-shadow: 0 0 26px rgba(95, 240, 216, 0.4), inset 0 0 14px rgba(95, 240, 216, 0.16); }
+  .btn.ghost:hover, .icon-btn:hover, .nav button:hover, .chip:is(button):hover, .tabs button:hover { border-color: var(--accent); color: var(--text); }
+  .card:hover { transform: translateY(-3px); }
+  .room:hover { background: radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 70%); }
+  .slot:is(button):hover { border-color: var(--accent); }
+}
+/* Short landscape windows: keep the controls compact so the scene stays visible. */
+@media (max-height: 560px) {
+  .nav button { min-height: 44px; }
+  .nav .play { min-height: 50px; }
+  .card { min-height: 108px; }
+}
 
 #shop .card { min-height: 104px; padding: 8px 3px 6px; }
 #shop .card .nm { font-size: 10.5px; min-height: 24px; }

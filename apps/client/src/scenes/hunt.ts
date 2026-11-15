@@ -9,7 +9,7 @@ import { Container, Graphics, Sprite as PixiSprite } from 'pixi.js';
 import { sprite, tex } from '../gfx/assets';
 import { CrabView } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';
-import { pixi, VIEW_W, viewHeight, type Scene } from '../gfx/stage';
+import { pixi, viewHeight, viewWidth, type Scene } from '../gfx/stage';
 import { BIOME_LOOK, Deep, glowTexture } from '../gfx/deep';
 import { loadLocal, removeLocal, saveLocal } from '../platform/storage';
 import { audio, sfx } from '../sound';
@@ -189,6 +189,48 @@ export class HuntScene implements Scene {
   private tutorial: boolean;
   private dangerTime: number;
   private canvas: HTMLCanvasElement;
+  /** Arrow keys and WASD steer like a held finger: the crab walks while a key is down and hides when all are up. */
+  private keys = new Set<string>();
+  private static readonly KEY_DIR: Record<string, [number, number]> = {
+    ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0],
+  };
+  private keyTarget(): { x: number; y: number } | null {
+    let dx = 0;
+    let dy = 0;
+    for (const k of this.keys) {
+      const d = HuntScene.KEY_DIR[k];
+      if (d) {
+        dx += d[0];
+        dy += d[1];
+      }
+    }
+    const len = Math.hypot(dx, dy);
+    return len > 0 ? { x: this.cx + (dx / len) * 160, y: this.cy - 14 + (dy / len) * 160 } : null;
+  }
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (!(e.code in HuntScene.KEY_DIR) || this.finished) return;
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    if (this.paused) this.setPaused(false);
+    this.keys.add(e.code);
+    this.byKeys = true;
+    this.hidden = false;
+    this.idleT = 0;
+  };
+  private onKeyUp = (e: KeyboardEvent): void => {
+    if (!this.keys.delete(e.code) || this.keys.size > 0 || !this.byKeys) return;
+    this.byKeys = false;
+    this.onUp();
+  };
+  private onBlur = (): void => {
+    if (this.keys.size === 0) return;
+    this.keys.clear();
+    this.byKeys = false;
+    this.onUp();
+  };
+  private byKeys = false;
   private onVis = (): void => {
     if (document.hidden) this.setPaused(true);
   };
@@ -245,6 +287,9 @@ export class HuntScene implements Scene {
     this.canvas.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
     window.addEventListener('pointercancel', this.onUp);
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onBlur);
     document.addEventListener('visibilitychange', this.onVis);
     this.pushHud();
   }
@@ -374,7 +419,7 @@ export class HuntScene implements Scene {
   private syncChunks(): void {
     const size = H.chunk;
     const vh = viewHeight() / ZOOM;
-    const vw = VIEW_W / ZOOM;
+    const vw = viewWidth() / ZOOM;
     const pad = 160;
     const x0 = Math.floor((this.cx - vw / 2 - pad) / size);
     const x1 = Math.floor((this.cx + vw / 2 + pad) / size);
@@ -403,7 +448,7 @@ export class HuntScene implements Scene {
   /** Distance at which things appear and disappear: just outside the screen. */
   private ringRadius(): number {
     const vh = viewHeight() / ZOOM;
-    const vw = VIEW_W / ZOOM;
+    const vw = viewWidth() / ZOOM;
     return Math.hypot(vw / 2, vh / 2) + 50;
   }
 
@@ -416,8 +461,12 @@ export class HuntScene implements Scene {
     const icon = sprite(`icon/diet_${def.diet}`, 0.42);
     icon.y = body.y - 30 * scale;
     root.addChild(body, icon);
+    // Placed at once: a creature left at the origin would flash there until its first update.
+    root.position.set(x, y);
+    root.zIndex = y;
     this.ents.addChild(root);
     const glow = this.makeGlow(stalker ? 0xff4a5a : DIET_TINT[def.diet] ?? 0xffffff, (70 + def.rank * 16) * (stalker ? 1.6 : 1), 0.3);
+    glow.position.set(x, y);
     const hp = H.creatureHpBase * Math.pow(tier, H.creatureHpPow) * (stalker ? 1.3 : 1);
     const c: Creature = {
       def, tier, x, y, vx: 0, vy: 0, hp, maxHp: hp, r: 12 * scale, root, body, icon, dir: this.rng.next() * Math.PI * 2,
@@ -475,21 +524,22 @@ export class HuntScene implements Scene {
 
   private toWorld(e: PointerEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const k = (rect.width / VIEW_W) * ZOOM;
+    const k = (rect.width / viewWidth()) * ZOOM;
     return { x: (e.clientX - rect.left) / k + this.camX, y: (e.clientY - rect.top) / k + this.camY };
   }
   private onDown = (e: PointerEvent): void => {
     if (this.finished) return;
     if (this.paused) this.setPaused(false);
+    this.byKeys = false;
     this.target = this.toWorld(e);
     this.hidden = false;
     this.idleT = 0;
   };
   private onMove = (e: PointerEvent): void => {
-    if (this.target && !this.finished) this.target = this.toWorld(e);
+    if (this.target && !this.byKeys && !this.finished) this.target = this.toWorld(e);
   };
   private onUp = (): void => {
-    if (!this.target) return;
+    if (!this.target || this.byKeys) return;
     this.target = null;
     this.hidden = true;
     sfx('hide', { volume: 0.5 });
@@ -499,6 +549,8 @@ export class HuntScene implements Scene {
     if (this.paused === p || this.finished) return;
     this.paused = p;
     if (p) {
+      this.keys.clear();
+      this.byKeys = false;
       this.target = null;
       this.hidden = true;
       this.save();
@@ -770,7 +822,7 @@ export class HuntScene implements Scene {
   /** Test hook: where things are on screen (client px), so an automated player can steer. */
   debugState(): { crab: { x: number; y: number }; eaten: number; time: number; creatures: { x: number; y: number; edible: boolean }[]; nodes: { x: number; y: number }[] } {
     const rect = this.canvas.getBoundingClientRect();
-    const k = (rect.width / VIEW_W) * ZOOM;
+    const k = (rect.width / viewWidth()) * ZOOM;
     const sc = (x: number, y: number): { x: number; y: number } => ({ x: rect.left + (x - this.camX) * k, y: rect.top + (y - this.camY) * k });
     return {
       crab: sc(this.cx, this.cy - 14),
@@ -833,6 +885,7 @@ export class HuntScene implements Scene {
     // Crab movement: follow the finger.
     const speed = heroDef(this.run.cfg.heroId).speed * (1 + this.mods.speedPct / 100);
     let moving = false;
+    if (this.byKeys) this.target = this.keyTarget();
     if (this.target) {
       const dx = this.target.x - this.cx;
       const dy = this.target.y - (this.cy - 14);
@@ -1148,7 +1201,7 @@ export class HuntScene implements Scene {
     this.crab.update(dt);
 
     const vh = viewHeight() / ZOOM;
-    const vw = VIEW_W / ZOOM;
+    const vw = viewWidth() / ZOOM;
     const tx = this.cx - vw / 2;
     const ty = this.cy - vh * 0.52;
     this.camX += (tx - this.camX) * Math.min(1, dt * 6);
@@ -1177,6 +1230,8 @@ export class HuntScene implements Scene {
   resize(w: number, h: number): void {
     this.deep.resize(w, h);
     this.dark.clear().rect(0, 0, w, h).fill({ color: 0x02040f });
+    // A pool restored while paused never reaches update(), so the veil gets its level here too.
+    this.dark.alpha = BIOME_LOOK[this.info.biome].dark;
     this.world.scale.set(ZOOM);
     this.camX = this.cx - w / ZOOM / 2;
     this.camY = this.cy - (h / ZOOM) * 0.52;
@@ -1189,6 +1244,9 @@ export class HuntScene implements Scene {
     this.canvas.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerup', this.onUp);
     window.removeEventListener('pointercancel', this.onUp);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('visibilitychange', this.onVis);
     huntHud.value = null;
     audio.setIntensity(0);
