@@ -4,7 +4,7 @@ import {
   SET_THRESHOLDS, shellDef, slotCount, stageInfo, tenantDef, wouldMerge, xpNeed,
   type Diet, type Enemy, type Offer, type PublicRun, type TenantInst,
 } from '@shellter/shared';
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { api } from '../api';
 import { battleScene, hunt, showcase } from '../director';
@@ -91,81 +91,26 @@ function MergePips(props: { have: number; need: number; full: boolean }): JSX.El
   );
 }
 
-/** Everything about an offer before the player commits: what it does at every star and what happens on the shell. */
-function OfferDetail(props: { offer: Offer; r: PublicRun; price?: number; onTake: () => void; onClose: () => void }): JSX.Element {
-  const { offer: o, r } = props;
-  const afford = props.price === undefined || r.pearls >= props.price;
-  let head: JSX.Element;
-  let lines: JSX.Element | null = null;
-  let outcome: string | null = null;
-  if (o.type === 'tenant') {
-    const def = tenantDef(o.id);
-    const need = heroDef(r.cfg.heroId).mergeCount;
-    const have = ownedCount(r, o.id, o.star);
-    const merge = wouldMerge({ ...r, seed: '' }, o.id, o.star);
-    outcome = merge ? t('camp.out.merge', { n: o.star + 1 }) : r.slots.includes(null) ? t('camp.out.slot') : t('camp.out.replace');
-    head = (
-      <div class="row" style={{ alignItems: 'flex-start', gap: '12px' }}>
-        <Spr id={`tenant/${o.id}`} size={84} />
-        <div class="col grow" style={{ gap: '4px' }}>
-          <div class="h2">{name('tenant', o.id)} <Stars n={o.star} /></div>
-          <div class="row wrap" style={{ gap: '4px' }}>
-            {def.families.map((d) => <span class={`set diet-${d}`} key={d}><DietIcon diet={d} size={14} />{t(`diet.${d}`)}</span>)}
-          </div>
-          <div class="muted small">{t(`camp.role.${def.role}`)}</div>
-          <div class="row small" style={{ gap: '6px' }}><MergePips have={have} need={need} full={merge} />{t('camp.have', { n: have, need })}</div>
-        </div>
-      </div>
-    );
-    lines = (
-      <div class="starlines">
-        {([1, 2, 3] as const).map((st) => (
-          <div class={st === o.star ? 'cur' : ''} key={st}><Stars n={st} /><span>{abilityText(def.ability, st)}</span></div>
-        ))}
-      </div>
-    );
-  } else if (o.type === 'mutation') {
-    const def = mutationDef(o.id);
-    const cur = r.mutations[def.slot];
-    if (cur && cur.id !== o.id) outcome = t('camp.mutation.replaces', { name: name('mut', cur.id) });
-    head = (
-      <div class="row" style={{ alignItems: 'flex-start', gap: '12px' }}>
-        <Spr id={`icon/${def.slot}`} size={72} />
-        <div class="col grow" style={{ gap: '4px' }}>
-          <div class="h2">{name('mut', o.id)}</div>
-          <div class="row"><span class={`set diet-${def.diet}`}><DietIcon diet={def.diet} size={14} />{t(`diet.${def.diet}`)}</span></div>
-          <div class="muted small">{name('slot', def.slot)}</div>
-        </div>
-      </div>
-    );
-    lines = (
-      <div class="starlines">
-        {def.tiers.map((m, i) => <div class={i + 1 === o.tier ? 'cur' : ''} key={i}><b>{t('camp.tier', { n: i + 1 })}</b><span>{modLines(m).join(', ')}</span></div>)}
-      </div>
-    );
-  } else {
-    head = (
-      <div class="row" style={{ gap: '12px' }}>
-        <Spr id="icon/heart" size={64} />
-        <div class="col grow" style={{ gap: '4px' }}>
-          <div class="h2">{t('camp.heal')}</div>
-          <div class="muted small">{t('camp.heal.desc', { n: o.pct })}</div>
-        </div>
-      </div>
-    );
-  }
+/** What a tenant on the shell does, shown in a bubble over its slot. */
+function TenantTip(props: { tn: TenantInst; r: PublicRun; children?: ComponentChildren }): JSX.Element {
+  const { tn, r } = props;
+  const def = tenantDef(tn.id);
+  const need = heroDef(r.cfg.heroId).mergeCount;
+  const have = ownedCount(r, tn.id, tn.star);
   return (
-    <Sheet onClose={props.onClose} id="offer-detail">
-      {head}
-      {lines}
-      {outcome ? <div class="small" style={{ color: 'var(--gold)' }}>{outcome}</div> : null}
-      <div class="row" style={{ gap: '8px' }}>
-        <Btn class="ghost" id="detail-cancel" onClick={props.onClose}>{t('common.cancel')}</Btn>
-        <Btn class="ok grow" id="detail-take" disabled={!afford} onClick={props.onTake}>
-          {props.price !== undefined ? <>{t('camp.buy')} <Spr id="icon/pearl" size={18} />{props.price}</> : t('camp.take')}
-        </Btn>
+    <>
+      <div class="row between" style={{ gap: '6px' }}>
+        <b>{name('tenant', tn.id)} <Stars n={tn.star} /></b>
+        {tn.star < 3 ? <MergePips have={have} need={need} full={false} /> : null}
       </div>
-    </Sheet>
+      <div class="row wrap" style={{ gap: '4px' }}>
+        {def.families.map((d) => <span class={`set diet-${d}`} key={d}><DietIcon diet={d} size={14} />{t(`diet.${d}`)}</span>)}
+        <span class="muted tiny">{t(`camp.role.${def.role}`)}</span>
+      </div>
+      <div class="small">{abilityText(def.ability, tn.star)}</div>
+      {tn.star < 3 ? <div class="muted tiny"><Stars n={tn.star + 1} /> {abilityText(def.ability, (tn.star + 1) as 2 | 3)}</div> : null}
+      {props.children}
+    </>
   );
 }
 
@@ -227,27 +172,85 @@ function OfferCard(props: { offer: Offer; r: PublicRun; price?: number; sold?: b
   );
 }
 
-function SlotStrip(props: { r: PublicRun; selected: number | null; onTap: (i: number) => void; merged: number[]; same?: string | null }): JSX.Element {
+/**
+ * The shell's slots. A tap opens the tenant's bubble (or names the slot when something waits to be
+ * placed); dragging a tenant onto another slot moves or swaps it.
+ */
+function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean; onTap: (i: number) => void; onMove: (from: number, to: number) => void; merged: number[]; tip: JSX.Element | null }): JSX.Element {
   const { r } = props;
   const fc = frontCount(r.slots.length);
+  const drag = useSignal<{ from: number; x: number; y: number; over: number | null } | null>(null);
+  const press = useRef<{ i: number; x: number; y: number; id: number } | null>(null);
+  const dragged = useRef(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const slotAt = (x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y)?.closest('.slot');
+    return el ? Number(el.id.slice(5)) : null;
+  };
+  const down = (e: PointerEvent, i: number): void => {
+    dragged.current = false;
+    if (!r.slots[i] || props.picking) return;
+    press.current = { i, x: e.clientX, y: e.clientY, id: e.pointerId };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const move = (e: PointerEvent): void => {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
+    if (!drag.value && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 8) return;
+    dragged.current = true;
+    drag.value = { from: p.i, x: e.clientX, y: e.clientY, over: slotAt(e.clientX, e.clientY) };
+  };
+  const up = (e: PointerEvent): void => {
+    const d = drag.value;
+    press.current = null;
+    drag.value = null;
+    if (!d) return;
+    const to = slotAt(e.clientX, e.clientY);
+    if (to !== null && to !== d.from) props.onMove(d.from, to);
+  };
+  const cancel = (): void => {
+    press.current = null;
+    drag.value = null;
+  };
+  const d = drag.value;
+  const held = d ? r.slots[d.from] : null;
   const cell = (tn: TenantInst | null, i: number): JSX.Element => {
     const def = tn ? tenantDef(tn.id) : null;
     const row = i < fc ? 'front' : 'back';
+    const cls = `slot ${row} ${props.open === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''} ${d?.from === i ? 'lift' : ''} ${d && d.over === i && d.from !== i ? 'over' : ''} ${props.picking ? 'pick' : ''}`;
     return (
-      <button class={`slot ${row} ${props.selected === i ? 'sel' : ''} ${props.merged.includes(i) ? 'merge' : ''} ${tn && props.same === tn.id ? 'same' : ''}`} key={`${i}-${tn?.id ?? 'x'}-${tn?.star ?? 0}`} id={`slot-${i}`} onClick={() => props.onTap(i)}>
+      <button
+        class={cls} key={`${i}-${tn?.id ?? 'x'}-${tn?.star ?? 0}`} id={`slot-${i}`}
+        onPointerDown={(e) => down(e, i)} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}
+        onClick={() => {
+          if (dragged.current) {
+            dragged.current = false;
+            return;
+          }
+          props.onTap(i);
+        }}
+      >
         {tn ? <Spr id={`tenant/${tn.id}`} size={34} /> : <span class="tiny muted">+</span>}
         {tn ? <Stars n={tn.star} /> : null}
-        {def && def.role === row ? <span class="ok">✓</span> : null}
+        {def && def.role === row ? <span class="ok" /> : null}
       </button>
     );
   };
+  // The bubble hangs over its slot and stays inside the panel.
+  const anchor = props.open !== null ? document.getElementById(`slot-${props.open}`) : null;
+  const W = wrap.current?.clientWidth ?? 320;
+  const tw = Math.min(300, W);
+  const cx = anchor ? anchor.offsetLeft + anchor.offsetWidth / 2 : W / 2;
+  const left = Math.max(0, Math.min(W - tw, cx - tw / 2));
   return (
-    <div class="col" style={{ gap: '3px' }}>
+    <div class="col slots-wrap" style={{ gap: '3px' }} ref={wrap}>
       <div class="row between rowlabel">
         <span style={{ color: '#ffb37a' }}><Spr id="icon/front" size={12} /> {t('camp.front')}</span>
         <span style={{ color: '#7fd6ff' }}>{t('camp.back')} <Spr id="icon/back" size={12} /></span>
       </div>
       <div class="slots">{r.slots.map(cell)}</div>
+      {props.tip && anchor ? <div class="tip col" id="tenant-tip" style={{ left: `${left}px`, width: `${tw}px`, '--ax': `${cx - left}px` }}>{props.tip}</div> : null}
+      {d && held ? <span class="drag-ghost" style={{ left: `${d.x}px`, top: `${d.y}px` }}><Spr id={`tenant/${held.id}`} size={46} /></span> : null}
     </div>
   );
 }
@@ -301,7 +304,6 @@ export function CampView(): JSX.Element | null {
   const p = player.value;
   const selected = useSignal<number | null>(null);
   const pending = useSignal<{ kind: 'offer' | 'buy' | 'order'; index: number } | null>(null);
-  const detail = useSignal<{ kind: 'offer' | 'buy'; index: number; offer: Offer; price?: number } | null>(null);
   const confirmCarry = useSignal(false);
   const merged = useSignal<number[]>([]);
   const tut = useSignal<string | null>(null);
@@ -337,6 +339,15 @@ export function CampView(): JSX.Element | null {
     else tut.value = null;
   }, [r?.camp?.after, r?.camp?.offerTaken]);
 
+  useEffect(() => {
+    // The tenant bubble closes on a tap anywhere else.
+    const close = (e: PointerEvent): void => {
+      if (selected.value !== null && !(e.target as Element | null)?.closest?.('.tip, .slot')) selected.value = null;
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, []);
+
   if (!r || !p) return null;
   const camp = r.camp;
   const fighter = buildFighter(buildOfRun(r));
@@ -356,23 +367,17 @@ export function CampView(): JSX.Element | null {
     if (res && kind !== 'offer') sfx('buy');
     track('tutorial_step', { step: `camp_${kind}_${after}` });
   };
-  /** A tap on a card only opens its description; nothing is taken or bought without a confirmation. */
+  /** Cards say what they do, so a tap takes or buys at once; only a full shell asks which tenant to replace. */
   const pick = (kind: 'offer' | 'buy', index: number, o: Offer, price?: number): void => {
     if (busy.value) return;
     selected.value = null;
-    pending.value = null;
-    detail.value = price !== undefined ? { kind, index, offer: o, price } : { kind, index, offer: o };
-  };
-  const confirm = (): void => {
-    const d = detail.value;
-    if (!d || busy.value) return;
-    detail.value = null;
-    if (d.price !== undefined && r.pearls < d.price) return showToast(t('camp.nopearls'));
-    if (needsSlot(d.offer)) {
-      pending.value = { kind: d.kind, index: d.index };
+    if (price !== undefined && r.pearls < price) return showToast(t('camp.nopearls'));
+    if (needsSlot(o)) {
+      pending.value = { kind, index };
       return;
     }
-    void take(d.kind, d.index);
+    pending.value = null;
+    void take(kind, index);
   };
   const order = (i: number): void => {
     const src = r.slots[i];
@@ -391,17 +396,11 @@ export function CampView(): JSX.Element | null {
       if (pending.value.kind === 'order' && pending.value.index === i) return;
       return void take(pending.value.kind, pending.value.index, i);
     }
-    if (selected.value === null) {
-      if (r.slots[i]) selected.value = i;
-      return;
-    }
-    if (selected.value === i) {
-      selected.value = null;
-      return;
-    }
-    const from = selected.value;
+    selected.value = selected.value === i || !r.slots[i] ? null : i;
+  };
+  const moveSlot = (from: number, to: number): void => {
     selected.value = null;
-    void act({ type: 'move', from, to: i });
+    void act({ type: 'move', from, to });
   };
   const go = async (): Promise<void> => {
     if (waitingBattle) {
@@ -458,27 +457,27 @@ export function CampView(): JSX.Element | null {
       {tut.value ? <div class="hint shadow-text" style={{ marginTop: 0, marginBottom: '6px', fontSize: '14px' }} id="camp-tut">{t(tut.value)}</div> : null}
       <div class="panel col" style={{ gap: '8px', padding: '10px' }}>
         <SetChips r={r} />
-        <SlotStrip r={r} selected={selected.value} onTap={tapSlot} merged={merged.value} same={sel?.id ?? null} />
+        <SlotStrip
+          r={r} open={selected.value} picking={pending.value !== null} onTap={tapSlot} onMove={moveSlot} merged={merged.value}
+          tip={sel && selected.value !== null ? (
+            <TenantTip tn={sel} r={r}>
+              <div class="row" style={{ gap: '6px', justifyContent: 'flex-end' }}>
+                {camp && !waitingBattle && !camp.ordered && sel.star < 3 ? (
+                  <Btn class="sm" id="order-btn" disabled={r.pearls < orderPrice(sel)} onClick={() => { const i = selected.value; if (i !== null) order(i); }}>
+                    {t('camp.order')} <Spr id="icon/pearl" size={15} />{orderPrice(sel)}
+                  </Btn>
+                ) : null}
+                <Btn class="sm ghost" id="sell-btn" sound="sell" onClick={() => { const i = selected.value; selected.value = null; if (i !== null) void act({ type: 'sell', slot: i }); }}>
+                  {t('camp.sell', { n: (BAL.sellPrice[tenantDef(sel.id).rarity - 1] ?? 1) * 3 ** (sel.star - 1) })}
+                </Btn>
+              </div>
+            </TenantTip>
+          ) : null}
+        />
         {pending.value ? (
           <div class="row between" id="replace-row">
             <span class="small" style={{ color: 'var(--gold)' }}>{t('camp.replace')}</span>
-            <Btn class="sm ghost" id="replace-cancel" onClick={() => (pending.value = null)}>{t('common.cancel')}</Btn>
-          </div>
-        ) : null}
-        {sel && selected.value !== null ? (
-          <div class="row between">
-            <div class="grow small">
-              <b>{name('tenant', sel.id)}</b> <Stars n={sel.star} />
-              <div class="muted tiny">{tenantText(sel.id, sel.star)} · {t(`camp.role.${tenantDef(sel.id).role}`)}</div>
-            </div>
-            {camp && !waitingBattle && !camp.ordered && sel.star < 3 ? (
-              <Btn class="sm" id="order-btn" disabled={r.pearls < orderPrice(sel)} onClick={() => { const i = selected.value; if (i !== null) order(i); }}>
-                {t('camp.order')} <Spr id="icon/pearl" size={15} />{orderPrice(sel)}
-              </Btn>
-            ) : null}
-            <Btn class="sm ghost" id="sell-btn" sound="sell" onClick={() => { const i = selected.value; selected.value = null; if (i !== null) void act({ type: 'sell', slot: i }); }}>
-              {t('camp.sell', { n: (BAL.sellPrice[tenantDef(sel.id).rarity - 1] ?? 1) * 3 ** (sel.star - 1) })}
-            </Btn>
+            <button class="icon-btn" id="replace-cancel" aria-label={t('common.cancel')} onClick={() => (pending.value = null)}><Ico id="close" /></button>
           </div>
         ) : null}
         <GeneBars r={r} up={up} />
@@ -521,7 +520,6 @@ export function CampView(): JSX.Element | null {
           </span>
         </Btn>
       </div>
-      {detail.value ? <OfferDetail offer={detail.value.offer} r={r} price={detail.value.price} onTake={confirm} onClose={() => (detail.value = null)} /> : null}
       {camp?.shellChoices ? (
         <Sheet mid title={t('camp.shell.title')} id="shell-sheet">
           <div class="muted small">{t('camp.shell.sub')}</div>
