@@ -209,7 +209,7 @@ export class HuntScene implements Scene {
   private parries = 0;
   /** Clock time the crab last went into its shell. */
   private hidAt = -1;
-  private sawWind = false;
+  private windHintT = 0;
   private w = 390;
   private h = 700;
   private canvas: HTMLCanvasElement;
@@ -965,8 +965,9 @@ export class HuntScene implements Scene {
   }
 
   private hint(): string | null {
-    if (this.parries === 0 && this.run.stage <= 4 && this.creatures.some((c) => c.windT > 0)) this.sawWind = true;
-    if (this.sawWind && this.parries === 0 && this.run.stage <= 4 && (this.run.stats.parries ?? 0) === 0 && this.creatures.some((c) => c.tier > this.size && Math.hypot(c.x - this.cx, c.y - this.cy) < 130)) return 'hunt.hint.parry';
+    // Parrying is a bonus, never a duty: it is named once, the first time a bite is announced, and then left alone.
+    if (this.windHintT === 0 && (this.run.stats.parries ?? 0) === 0 && this.parries === 0 && this.creatures.some((c) => c.windT > 0)) this.windHintT = this.time + 3.5;
+    if (this.time < this.windHintT && this.parries === 0) return 'hunt.hint.parry';
     if (!this.tutorial) return null;
     if (this.moved < 80) return 'hunt.hint.move';
     if (this.eatenCount < 3) return 'hunt.hint.eat';

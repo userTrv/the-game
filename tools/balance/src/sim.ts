@@ -155,7 +155,7 @@ function nextGuardianWeak(state: RunState): readonly Diet[] {
 
 /** Shuffles tenants between cells while a swap makes the build stronger: links and rows both count. */
 function arrange(state: RunState): RunState {
-  for (let guard = 0; guard < 12; guard++) {
+  for (let guard = 0; guard < 4; guard++) {
     const base = ratePower(runFighter(state));
     let best: { from: number; to: number; p: number } | null = null;
     for (let from = 0; from < state.slots.length; from++) {
@@ -212,6 +212,7 @@ function placement(state: RunState, offer: Offer, policy: Policy, value: number)
 }
 
 function campActions(state: RunState, policy: Policy, rng: Rng): RunState {
+  const before = JSON.stringify(state.slots);
   const act = (a: RunAction): void => {
     state = applyRunAction(state, a).state;
   };
@@ -265,7 +266,8 @@ function campActions(state: RunState, policy: Policy, rng: Rng): RunState {
     }
     break;
   }
-  return policy.random ? state : arrange(state);
+  // Nothing new on the shell: the arrangement found at the last camp still stands.
+  return policy.random || JSON.stringify(state.slots) === before ? state : arrange(state);
 }
 
 export function simulateRun(seed: string, policy: Policy, profile: Profile, heroId = 'hermit', onBattle?: (before: RunState, won: boolean) => void): RunOutcome {

@@ -414,7 +414,7 @@ export const en: Record<string, string> = {
   'feat.duel3': 'Beat 3 rivals in one run',
   'feat.set6': 'Gather 6 tenants of one family',
   'feat.new': 'Unlocked',
-  'hunt.hint.parry': 'The predator froze: hide now to parry',
-  'hunt.hint.parry.mouse': 'The predator froze: press Space to parry',
+  'hunt.hint.parry': 'Let go while the predator is frozen to parry the bite',
+  'hunt.hint.parry.mouse': 'Hide while the predator is frozen to parry the bite',
   'hunt.parry': 'Parried!',
 };

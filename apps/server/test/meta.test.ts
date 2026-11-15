@@ -69,6 +69,8 @@ describe('town and meta', () => {
     const [row] = await h.handle.db.select().from(players).where(eq(players.id, a.player.id));
     const q = row!.quests!;
     q.daily[0]!.progress = 99999;
+    // The run above may have finished the second quest by chance; this test needs it open.
+    q.daily[1]!.progress = 0;
     await h.handle.db.update(players).set({ quests: q }).where(eq(players.id, a.player.id));
     const claim = await h.call<P & { reward: { passXp: number } }>('POST', '/api/quests/claim', { id: q.daily[0]!.id }, a.token);
     expect(claim.status).toBe(200);
