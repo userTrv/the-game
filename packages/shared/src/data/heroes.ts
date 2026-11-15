@@ -28,8 +28,12 @@ export interface HeroDef {
   /** Every Nth claw attack is a heavy punch. */
   punch?: { every: number; mult: number; stun: number };
   mods: ModPatch;
+  /** Multiplier for neighbour links on the shell grid (default 1). */
+  linkPower?: number;
   /** Hatchery level that unlocks the hero. */
   unlock: number;
+  /** Feat that has to be done once before the hero can be picked (on top of `unlock`). */
+  feat?: string;
 }
 
 export const HEROES: readonly HeroDef[] = [
@@ -78,6 +82,24 @@ export const HEROES: readonly HeroDef[] = [
     punch: { every: 4, mult: 2.2, stun: 0.4 },
     mods: { crit: 5 },
     unlock: 4,
+  },
+  {
+    // Everything is about placement: weaker tenants, links twice as strong.
+    id: 'weaver',
+    layout: 'shell',
+    hp: 95,
+    atk: 7,
+    interval: 1.25,
+    speed: 150,
+    slotDelta: 1,
+    maxSlots: 9,
+    tenantPower: 0.8,
+    mergeCount: 3,
+    geneMult: 1,
+    mods: {},
+    linkPower: 2,
+    unlock: 0,
+    feat: 'links3',
   },
 ];
 

@@ -1,4 +1,5 @@
 import { BAL } from './data/balance';
+import { FEATS } from './data/feats';
 import { CREATURES } from './data/creatures';
 import { GUARDIANS } from './data/guardians';
 import { HEROES, heroDef } from './data/heroes';
@@ -35,6 +36,8 @@ export interface Profile {
   tutorialDone: boolean;
   /** Tenants switched off in the garden: they are not offered in runs. */
   gardenOff?: string[];
+  /** Feats done at least once (see data/feats.ts). */
+  feats?: string[];
 }
 
 export interface Almanac {
@@ -74,6 +77,11 @@ export function newProfile(now: number): Profile {
     stats: { runs: 0, carried: 0, defeats: 0, bestStage: 0, chapterCleared: false, eaten: 0, merges: 0, ghostWins: 0 },
     tutorialDone: false,
   };
+}
+
+/** True when the content has no feat or the feat is done. */
+export function featDone(profile: Profile, feat: string | undefined): boolean {
+  return !feat || (profile.feats ?? []).includes(feat);
 }
 
 export class MetaError extends Error {
@@ -118,7 +126,7 @@ export function upgradeBuilding(profile: Profile, b: BuildingId): Profile {
 }
 
 export function unlockedHeroes(profile: Profile): string[] {
-  return HEROES.filter((h) => h.unlock <= profile.buildings.hatchery).map((h) => h.id);
+  return HEROES.filter((h) => h.unlock <= profile.buildings.hatchery && featDone(profile, h.feat)).map((h) => h.id);
 }
 
 export function selectHero(profile: Profile, heroId: string): Profile {
@@ -166,7 +174,7 @@ export type EventModifier = NonNullable<RunConfig['event']>;
 /** Everything a run inherits from the town, talents and the current weekly event. */
 /** Tenants unlocked by the garden level, in data order. */
 export function gardenUnlocked(profile: Profile): string[] {
-  return TENANTS.filter((t) => t.unlock <= profile.buildings.garden).map((t) => t.id);
+  return TENANTS.filter((t) => t.unlock <= profile.buildings.garden && featDone(profile, t.feat)).map((t) => t.id);
 }
 
 /** The run's tenant pool: unlocked tenants minus the ones the player switched off. */
@@ -212,7 +220,7 @@ export function runConfigFor(profile: Profile, heroId: string, event?: EventModi
     heroId,
     maxStage: lighthouse,
     tenantPool: gardenPool(profile),
-    shellPool: SHELLS.filter((s) => !s.starter && s.unlock <= b.workshop).map((s) => s.id),
+    shellPool: SHELLS.filter((s) => !s.starter && s.unlock <= b.workshop && featDone(profile, s.feat)).map((s) => s.id),
     mutSlots,
     mutMaxTier: b.lab >= 4 ? 3 : b.lab >= 3 ? 2 : 1,
     extraSlots: 0,
@@ -230,6 +238,8 @@ export function runConfigFor(profile: Profile, heroId: string, event?: EventModi
 // --- Run end ---------------------------------------------------------------------------------------
 
 export interface RunSummary {
+  /** Feats done for the first time in this run. */
+  newFeats: string[];
   coral: number;
   shine: number;
   trophies: number;
@@ -252,7 +262,11 @@ export function applyRunEnd(profile: Profile, run: RunState): { profile: Profile
     guardians: profile.almanac.guardians.slice(),
     claimed: profile.almanac.claimed.slice(),
   };
+  const feats = (profile.feats ?? []).slice();
+  const newFeats = FEATS.filter((f) => !feats.includes(f.id) && f.done(run.stats)).map((f) => f.id);
+  feats.push(...newFeats);
   const summary: RunSummary = {
+    newFeats,
     coral: rewards.coral,
     shine: rewards.shine,
     trophies: rewards.trophies,
@@ -293,6 +307,7 @@ export function applyRunEnd(profile: Profile, run: RunState): { profile: Profile
     shine: profile.shine + rewards.shine,
     trophies: Math.max(0, profile.trophies + rewards.trophies),
     almanac,
+    feats,
     tutorialDone: true,
     stats: {
       runs: profile.stats.runs + 1,

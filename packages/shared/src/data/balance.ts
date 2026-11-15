@@ -24,6 +24,11 @@ export const BAL = {
   // --- Tenants -------------------------------------------------------------------------------
   /** Bonus for a tenant sitting in its preferred row. */
   rowBonus: 1.25,
+  /** Damage multiplier of a family a guardian is weak to / resists. */
+  weakMult: 1.5,
+  resistMult: 0.6,
+  /** Links can shorten a neighbour's cooldown by at most this share. */
+  linkHasteCap: 50,
   /** Non-magnitude effects (durations, percents) get this share of family power. */
   softPowerShare: 0.4,
 
@@ -53,6 +58,8 @@ export const BAL = {
   /** Loot multiplier grows with depth: 1 + k * (stage - 1). */
   lootDepthK: 0.12,
   pearlToCoral: 2,
+  /** Pearls for beating the rival at a camp: base + stage / 3. */
+  duelPearls: 2,
   rerollBase: 1,
   rerollStep: 1,
   /** Tenant price in pearls by rarity (index = rarity - 1). */
@@ -108,6 +115,12 @@ export const BAL = {
     stalkerInterval: [22, 7] as readonly number[],
     stalkerExtraTierAt: 1.4,
     stalkerMaxAlive: 4,
+    /** The marked prey of a pool: pearls and genes of its family for eating it. */
+    trophyPearls: 3,
+    trophyGenes: 3,
+    /** A predator freezes this long before biting; hiding inside the window parries the bite. */
+    biteWindup: 0.45,
+    parryStun: 2,
     /** Pearls: nothing respawns. */
     oysterPearls: 1,
     chestPearls: 3,

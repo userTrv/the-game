@@ -1,4 +1,4 @@
-import { MAGNITUDE_KINDS, type ActiveAbility, type ActiveKind, type TenantDef } from './data/abilities';
+import { MAGNITUDE_KINDS, type ActiveAbility, type ActiveKind, type LinkDef, type TenantDef } from './data/abilities';
 import { BAL, GENE_PASSIVE, GENE_PASSIVE_MAX_STEPS, sizeScale } from './data/balance';
 import { guardianDef } from './data/guardians';
 import { heroDef } from './data/heroes';
@@ -38,6 +38,81 @@ export function slotRow(index: number, totalSlots: number): 'front' | 'back' {
 export function rowMult(def: TenantDef, index: number, totalSlots: number): number {
   if (def.role === 'any') return 1;
   return def.role === slotRow(index, totalSlots) ? BAL.rowBonus : 1;
+}
+
+/**
+ * Neighbours of a slot on the shell grid. The grid has two rows (front, back) and
+ * `frontCount(total)` columns: a cell touches the cells left and right of it in its row and the
+ * cell of the same column in the other row.
+ */
+export function gridNeighbors(index: number, totalSlots: number): number[] {
+  const fc = frontCount(totalSlots);
+  const front = index < fc;
+  const col = front ? index : index - fc;
+  const rowStart = front ? 0 : fc;
+  const rowLen = front ? fc : totalSlots - fc;
+  const out: number[] = [];
+  if (col > 0) out.push(rowStart + col - 1);
+  if (col < rowLen - 1) out.push(rowStart + col + 1);
+  const other = front ? fc + col : col;
+  if (other !== index && other >= 0 && other < totalSlots && (front ? col < totalSlots - fc : true)) out.push(other);
+  return out;
+}
+
+export interface ActiveLink {
+  /** Slot of the tenant that owns the link. */
+  from: number;
+  /** Slot it reaches (for `solo`: the tenant itself). */
+  to: number;
+  kind: LinkDef['kind'];
+  stat: LinkDef['stat'];
+  family: Diet;
+}
+
+export interface SlotLinks {
+  /** Power multiplier of every slot (1 = no links). */
+  power: number[];
+  /** Cooldown multiplier of every slot (1 = no links). */
+  cd: number[];
+  /** Links in effect, for drawing. */
+  active: ActiveLink[];
+}
+
+/** Everything neighbours do for each other on this shell. */
+export function slotLinks(slots: readonly (TenantInst | null)[], heroId: string): SlotLinks {
+  const k = heroDef(heroId).linkPower ?? 1;
+  const n = slots.length;
+  const power = new Array<number>(n).fill(0);
+  const haste = new Array<number>(n).fill(0);
+  const active: ActiveLink[] = [];
+  slots.forEach((t, i) => {
+    if (!t) return;
+    const def = tenantDef(t.id);
+    const link = def.link;
+    if (!link) return;
+    const v = (link.v[t.star - 1] as number) * k;
+    const around = gridNeighbors(i, n).filter((j) => slots[j]);
+    const match = around.filter((j) => !link.family || tenantDef((slots[j] as TenantInst).id).families.includes(link.family));
+    const family = link.family ?? def.families[0];
+    if (link.kind === 'solo') {
+      if (around.length === 0) {
+        power[i] = (power[i] as number) + v;
+        active.push({ from: i, to: i, kind: 'solo', stat: link.stat, family });
+      }
+      return;
+    }
+    for (const j of match) {
+      if (link.kind === 'bond') power[i] = (power[i] as number) + v;
+      else if (link.stat === 'haste') haste[j] = (haste[j] as number) + v;
+      else power[j] = (power[j] as number) + v;
+      active.push({ from: i, to: j, kind: link.kind, stat: link.stat, family });
+    }
+  });
+  return {
+    power: power.map((p) => 1 + p / 100),
+    cd: haste.map((h) => 1 - Math.min(BAL.linkHasteCap, h) / 100),
+    active,
+  };
 }
 
 /** Number of tenants per family (bridges count for both). */
@@ -90,11 +165,12 @@ export function computeMods(build: BuildSnapshot): Mods {
   }
 
   const total = build.slots.length;
+  const links = slotLinks(build.slots, build.heroId);
   build.slots.forEach((t, i) => {
     if (!t) return;
     const def = tenantDef(t.id);
     if (def.ability.type !== 'passive') return;
-    addMods(mods, def.ability.mods[t.star - 1], hero.tenantPower * rowMult(def, i, total));
+    addMods(mods, def.ability.mods[t.star - 1], hero.tenantPower * rowMult(def, i, total) * (links.power[i] as number));
   });
   return mods;
 }
@@ -147,6 +223,8 @@ export interface Fighter {
   stormEvery: number;
   punch?: { every: number; mult: number; stun: number };
   enrage?: { below: number; hastePct: number };
+  /** Multiplier of ability damage taken per family (guardians: weakness and resistance). */
+  taken?: Partial<DietMap>;
   abilities: AbilityInst[];
 }
 
@@ -177,6 +255,7 @@ export function buildAbilities(build: BuildSnapshot, mods: Mods): AbilityInst[] 
   const total = build.slots.length;
   const cdr = 1 - Math.min(50, Math.max(0, mods.cdrPct)) / 100;
   const sz = sizeScale(build.size, BAL.abilityPerSize);
+  const links = slotLinks(build.slots, build.heroId);
   const out: AbilityInst[] = [];
   build.slots.forEach((t, i) => {
     if (!t) return;
@@ -184,19 +263,20 @@ export function buildAbilities(build: BuildSnapshot, mods: Mods): AbilityInst[] 
     if (def.ability.type !== 'active') return;
     const a: ActiveAbility = def.ability;
     const power = familyPower(mods, def.families);
-    const row = rowMult(def, i, total);
+    const row = rowMult(def, i, total) * (links.power[i] as number);
+    const linkCd = links.cd[i] as number;
     const magnitude = sz * (1 + power / 100) * row * hero.tenantPower;
     const soft = (1 + (BAL.softPowerShare * power) / 100) * row * hero.tenantPower;
     const inst: AbilityInst = {
       src: i,
       kind: a.kind,
-      cd: Math.max(0.5, a.cd * cdr),
+      cd: Math.max(0.5, a.cd * cdr * linkCd),
       v: scaleEffect(a.kind, a.v[t.star - 1] as number, magnitude, soft),
       dur: a.dur ?? DEFAULT_DUR[a.kind] ?? 0,
       n: (a.n ?? 0) + (a.kind === 'zap' && def.families.includes('sting') ? mods.chainBonus : 0),
       family: def.families[0],
       // Stagger first uses so abilities do not all fire on the same tick.
-      first: Math.min(a.cd * cdr, 0.6 + 0.35 * i),
+      first: Math.min(a.cd * cdr * linkCd, 0.6 + 0.35 * i),
       range: a.range ?? 100,
     };
     if (a.also) {
@@ -303,5 +383,9 @@ export function guardianFighter(id: string, hpMult = 1, atkMult = 1): Fighter {
     }),
   };
   if (g.enrage) fighter.enrage = g.enrage;
+  const taken: Partial<DietMap> = {};
+  for (const d of g.weak) taken[d] = BAL.weakMult;
+  for (const d of g.resist) taken[d] = BAL.resistMult;
+  fighter.taken = taken;
   return fighter;
 }
