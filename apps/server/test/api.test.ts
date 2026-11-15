@@ -215,4 +215,32 @@ describe('runs', () => {
     }
     expect(found).toBe(true);
   });
+
+  it('a rival waits at every camp from the second pool; a duel costs no lives and happens once', async () => {
+    const a = await h.guest();
+    const me = (await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player.profile;
+    await h.handle.db.update(players).set({ profile: { ...me, tutorialDone: true } }).where(eq(players.id, a.player.id));
+    await h.handle.db.delete(ghosts);
+    await h.handle.db.insert(ghosts).values([{ id: 'rival-2', playerId: null, name: 'Sparring', stage: 2, power: 1, build: { ...botBuild(1, 'weak'), slots: [null, null, null], size: 1 }, createdAt: 1 }]);
+    const d = await startRun(h, a.token);
+    const first = await d.hunt();
+    expect(first.run!.camp!.rival).toBeUndefined();
+    expect(first.run!.camp!.paths).toHaveLength(3);
+    expect((await d.act({ type: 'duel' })).status).toBe(400);
+    d.seq -= 1;
+    await d.ok({ type: 'skip_offer' });
+    await d.ok({ type: 'descend', path: 1 });
+    const second = await d.hunt();
+    expect(second.run!.camp!.rival?.name).toBe('Sparring');
+    // The player's own build stays behind for others at both camps.
+    const mine = await h.handle.db.select().from(ghosts).where(eq(ghosts.playerId, a.player.id));
+    expect(mine.map((g) => g.stage).sort()).toEqual([1, 2]);
+    const fight = await d.ok({ type: 'duel' });
+    const ev = fight.events.find((e) => e.type === 'battle');
+    expect(ev?.type === 'battle' && ev.duel && ev.won).toBe(true);
+    expect(fight.run!.phase).toBe('camp');
+    expect(fight.run!.lives).toBe(second.run!.lives);
+    expect(fight.run!.pearls).toBeGreaterThan(second.run!.pearls);
+    expect((await d.act({ type: 'duel' })).status).toBe(400);
+  });
 });

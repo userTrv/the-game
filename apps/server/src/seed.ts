@@ -38,16 +38,18 @@ export function botBuild(stage: number, seed: string): BuildSnapshot {
 
 export async function seedDev(ctx: Ctx): Promise<void> {
   await ensureSchedule(ctx);
-  const [have] = await ctx.db.select({ n: sql<number>`count(*)::int` }).from(ghosts).where(sql`${ghosts.playerId} is null`);
-  if ((have?.n ?? 0) > 0) return;
+  const have = await ctx.db.select({ stage: ghosts.stage }).from(ghosts).where(sql`${ghosts.playerId} is null`).groupBy(ghosts.stage);
+  const seeded = new Set(have.map((h) => h.stage));
   const now = ctx.now();
   const rows: (typeof ghosts.$inferInsert)[] = [];
-  for (const stage of [6, 9, 15, 18, 21]) {
-    for (let i = 0; i < 16; i++) {
+  // Every stage gets bots, so a camp always has a rival even before real players reach it.
+  for (let stage = 2; stage <= 24; stage++) {
+    if (seeded.has(stage)) continue;
+    for (let i = 0; i < 12; i++) {
       const build = botBuild(stage, `bot/${stage}/${i}`);
       const name = `${NAMES[(i + stage) % NAMES.length]}`;
       rows.push({ id: randomId(), playerId: null, name, stage, power: ratePower(buildFighter(build)), build: { ...build, name }, createdAt: now });
     }
   }
-  await ctx.db.insert(ghosts).values(rows);
+  if (rows.length > 0) await ctx.db.insert(ghosts).values(rows);
 }
