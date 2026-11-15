@@ -367,6 +367,7 @@ export const en: Record<string, string> = {
   'settings.music': 'Music',
   'settings.sfx': 'Sounds',
   'settings.haptics': 'Vibration',
+  'settings.fullscreen': 'Fullscreen (F)',
   'settings.calm': 'Less shaking and flashing',
   'settings.lang': 'Language',
   'settings.notify': 'Bot notifications',

@@ -3,6 +3,7 @@ import { render } from 'preact';
 import { startDirector } from './director';
 import { loadAtlas } from './gfx/assets';
 import { loadBackdrop } from './gfx/deep';
+import { initFullscreen } from './platform/fullscreen';
 import { calm } from './gfx/fx';
 import { initStage, setPaused, takeFps } from './gfx/stage';
 import { t } from './i18n';
@@ -56,6 +57,8 @@ async function boot(): Promise<void> {
     bootError.value = t('common.offline');
   }
 }
+
+initFullscreen();
 
 document.addEventListener('visibilitychange', () => {
   setPaused(document.hidden);

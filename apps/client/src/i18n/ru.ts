@@ -367,6 +367,7 @@ export const ru: Record<string, string> = {
   'settings.music': 'Музыка',
   'settings.sfx': 'Звуки',
   'settings.haptics': 'Вибрация',
+  'settings.fullscreen': 'Во весь экран (F)',
   'settings.calm': 'Меньше тряски и вспышек',
   'settings.lang': 'Язык',
   'settings.notify': 'Уведомления от бота',
