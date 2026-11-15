@@ -184,8 +184,12 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
   const dragged = useRef(false);
   const wrap = useRef<HTMLDivElement>(null);
   const slotAt = (x: number, y: number): number | null => {
-    const el = document.elementFromPoint(x, y)?.closest('.slot');
-    return el ? Number(el.id.slice(5)) : null;
+    // Whatever lies on top (the dragged tenant itself, a bubble), the slot underneath counts.
+    for (const el of document.elementsFromPoint(x, y)) {
+      const slot = el.closest('.slot');
+      if (slot) return Number(slot.id.slice(5));
+    }
+    return null;
   };
   const down = (e: PointerEvent, i: number): void => {
     dragged.current = false;
@@ -212,6 +216,22 @@ function SlotStrip(props: { r: PublicRun; open: number | null; picking: boolean;
     press.current = null;
     drag.value = null;
   };
+  useEffect(() => {
+    // Safety net: if the release never reaches the slot (capture lost, window blurred), drop here.
+    const end = (e: Event): void => {
+      if (!press.current && !drag.value) return;
+      if (e instanceof PointerEvent && e.type === 'pointerup') up(e);
+      else cancel();
+    };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    window.addEventListener('blur', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      window.removeEventListener('blur', end);
+    };
+  });
   const d = drag.value;
   const held = d ? r.slots[d.from] : null;
   const cell = (tn: TenantInst | null, i: number): JSX.Element => {
