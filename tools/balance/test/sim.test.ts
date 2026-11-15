@@ -16,7 +16,8 @@ describe('balance simulator', () => {
         expect(s.avgStage).toBeLessThanOrEqual(s.maxStage);
       }
     }
-  });
+    // Bots try out rearrangements at every camp, which takes a few seconds on a slow machine.
+  }, 30_000);
 
   it('a new player usually beats the first guardian', () => {
     const omni = POLICIES.find((p) => p.id === 'omnivore')!;

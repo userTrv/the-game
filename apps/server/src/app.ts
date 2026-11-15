@@ -4,9 +4,9 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import {
   AdIntentBody, AnalyticsBody, applyQuestDeltas, AuthGuestBody, AuthTelegramBody, AuthWidgetBody, buyTalent, claimMilestone,
-  collectCorf, CORF_BOOST_MULT, CorfBody, COSMETIC_BY_ID, DoubleLootBody, HeroBody, IdBody, InvoiceBody, KrakenClaimBody, MetaError,
+  collectCorf, CORF_BOOST_MULT, CorfBody, COSMETIC_BY_ID, DoubleLootBody, GardenBody, HeroBody, IdBody, InvoiceBody, KrakenClaimBody, MetaError,
   NotifyBody, PASS_LEVELS, PASS_REWARDS, PASS_XP_PER_LEVEL, PassClaimBody, QUEST_BY_ID, RunActionBody, RunIdBody, selectHero,
-  SettingsBody, StartRunBody, UpgradeBody, upgradeBuilding,
+  SettingsBody, setGardenOff, StartRunBody, UpgradeBody, upgradeBuilding,
   type AuthResponse, type InboxItem, type MeResponse,
 } from '@shellter/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
@@ -250,6 +250,13 @@ export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { 
     const { heroId } = HeroBody.parse(req.body);
     return meta(req, (_tx, row) => {
       row.profile = selectHero(row.profile, heroId);
+      return {};
+    });
+  });
+  r.post('/api/town/garden', async (req) => {
+    const { off } = GardenBody.parse(req.body);
+    return meta(req, (_tx, row) => {
+      row.profile = setGardenOff(row.profile, off);
       return {};
     });
   });

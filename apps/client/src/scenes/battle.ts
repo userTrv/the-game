@@ -1,12 +1,12 @@
 import { signal } from '@preact/signals';
-import { buildFighter, enemyFighter, stageInfo, type BattleEvent, type BiomeId, type BuildSnapshot, type Fighter, type PublicRun } from '@shellter/shared';
+import { buildFighter, enemyFighter, krakenFighter, stageInfo, type BattleEvent, type BiomeId, type BuildSnapshot, type Fighter, type PublicRun } from '@shellter/shared';
 import type { Sprite } from 'pixi.js';
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Sprite as PixiSprite } from 'pixi.js';
 import { sprite } from '../gfx/assets';
 import { CrabView, type CrabLook } from '../gfx/crabView';
 import { calm, DIET_TINT, Fx } from '../gfx/fx';
-import { VIEW_W, type Scene } from '../gfx/stage';
-import { BIOME_LOOK, Water } from '../gfx/water';
+import { type Scene } from '../gfx/stage';
+import { BIOME_LOOK, Deep, glowTexture } from '../gfx/deep';
 import { sfx } from '../sound';
 import { haptic, player, type BattleView } from '../state';
 
@@ -38,7 +38,7 @@ const SFX_BY_KIND: Record<string, Parameters<typeof sfx>[0]> = {
 /** Plays back a simulated battle. The outcome is already known; this only animates the event log. */
 export class BattleScene implements Scene {
   readonly root = new Container();
-  private water: Water;
+  private water: Deep;
   private floor = new Graphics();
   private fx = new Fx();
   private actors: [Container, Container] = [new Container(), new Container()];
@@ -56,17 +56,18 @@ export class BattleScene implements Scene {
   private frenzy = false;
   private endT = 0;
   private baseY = 520;
+  private w = 390;
   private hudT = 0;
   private events: BattleEvent[];
 
   constructor(private view: BattleView, private onEnd: () => void) {
     const biome = view.kraken ? 'abyss' : stageInfo(view.stage).biome;
-    this.water = new Water(biome, 12);
+    this.water = new Deep(biome, 8);
     this.events = view.result.events;
     const myBuild = buildOfRun(view.me);
     const eq = player.value?.cosmetics.equipped;
     if (eq) myBuild.skin = { crab: eq.crab, shell: eq.shell };
-    this.fighters = [buildFighter(myBuild), enemyFighter(view.enemy)];
+    this.fighters = [buildFighter(myBuild), view.kraken ? krakenFighter() : enemyFighter(view.enemy)];
     this.hp = [this.fighters[0].maxHp, this.fighters[1].maxHp];
 
     const me = new CrabView();
@@ -88,13 +89,15 @@ export class BattleScene implements Scene {
       if (view.enemy.hpMult > 1) this.boss.tint = 0xffd0d0;
       this.actors[1].addChild(shadow, this.boss);
     }
-    this.root.addChild(this.water.root, this.floor, this.actors[1], this.actors[0], this.fx.layer);
+    this.root.addChild(this.water.root, this.floor, this.actors[1], this.actors[0], this.fx.layer, this.water.front);
     battleSpeed.value = 1;
     this.pushHud();
   }
 
   private pos(side: 0 | 1): { x: number; y: number } {
-    return { x: side === 0 ? 96 : VIEW_W - 104, y: this.baseY };
+    // Fighters keep their phone distance on wide screens instead of drifting to the edges.
+    const mid = this.w / 2;
+    return { x: side === 0 ? mid - Math.min(mid - 96, 150) : mid + Math.min(mid - 104, 160), y: this.baseY };
   }
 
   private center(side: 0 | 1): { x: number; y: number } {
@@ -287,12 +290,13 @@ export class BattleScene implements Scene {
 
   resize(w: number, h: number): void {
     this.water.resize(w, h);
+    this.w = w;
     this.baseY = Math.round(h * 0.6);
     const look = BIOME_LOOK[this.view.kraken ? 'abyss' : stageInfo(this.view.stage).biome];
+    // No floor in open water: two pools of light mark where the fighters hang.
     this.floor.clear();
-    this.floor.ellipse(w / 2, this.baseY + 60, w * 0.8, 110).fill({ color: look.floor });
-    this.floor.rect(0, this.baseY + 60, w, h).fill({ color: look.floor });
-    this.floor.ellipse(w / 2, this.baseY + 40, w * 0.62, 60).fill({ color: look.floor2, alpha: 0.5 });
+    this.floor.ellipse(this.pos(0).x, this.baseY + 8, 92, 26).fill({ color: look.glow, alpha: 0.1 });
+    this.floor.ellipse(this.pos(1).x + 8, this.baseY + 8, 120, 32).fill({ color: 0xff6a5a, alpha: 0.08 });
   }
 
   destroy(): void {
@@ -304,7 +308,7 @@ export class BattleScene implements Scene {
 /** Calm backdrop with the player's crab in the middle: camp, home and result screens. */
 export class ShowcaseScene implements Scene {
   readonly root = new Container();
-  private water: Water;
+  private water: Deep;
   private floor = new Graphics();
   private fx = new Fx();
   readonly crab = new CrabView();
@@ -313,14 +317,22 @@ export class ShowcaseScene implements Scene {
   private showCrab = true;
 
   constructor(biome: BiomeId, look: CrabLook | null, opts: { y?: number; scale?: number } = {}) {
-    this.water = new Water(biome, 16);
+    this.water = new Deep(biome, 10);
     this.biome = biome;
     this.y = opts.y ?? 0.3;
     this.scaleK = opts.scale ?? 1.6;
-    this.root.addChild(this.water.root, this.floor, this.crab, this.fx.layer);
+    this.root.addChild(this.water.root, this.pool, this.floor, this.crab, this.fx.layer, this.water.front);
     this.setLook(look);
   }
   private biome: BiomeId;
+  private pool = ShowcaseScene.makePool();
+  private static makePool(): PixiSprite {
+    const g = new PixiSprite(glowTexture());
+    g.anchor.set(0.5);
+    g.alpha = 0.3;
+    g.blendMode = 'add';
+    return g;
+  }
 
   setLook(look: CrabLook | null): void {
     this.showCrab = look !== null;
@@ -352,10 +364,12 @@ export class ShowcaseScene implements Scene {
     const look = BIOME_LOOK[this.biome];
     const fy = h * this.y + 30;
     this.floor.clear();
-    if (this.showCrab) {
-      this.floor.ellipse(w / 2, fy + 46, w * 0.7, 70).fill({ color: look.floor, alpha: 0.95 });
-      this.floor.ellipse(w / 2, fy + 34, w * 0.5, 34).fill({ color: look.floor2, alpha: 0.5 });
-    }
+    this.pool.visible = this.showCrab;
+    this.pool.tint = look.glow;
+    this.pool.position.set(w / 2, fy + 4);
+    const pw = Math.min(w, 430);
+    this.pool.width = pw * 1.25;
+    this.pool.height = pw * 1.05;
     this.crab.position.set(w / 2 + 18, fy + 22);
     this.crab.scale.set(this.scaleK);
   }

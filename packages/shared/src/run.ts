@@ -1,15 +1,15 @@
 import { simulateBattle, type BattleResult } from './battle';
-import { buildFighter, computeMods, familyCounts, guardianFighter, slotCount, type Fighter } from './build';
-import { BAL, genesForTier, xpForTier, xpNeed } from './data/balance';
-import { CREATURE_BY_ID } from './data/creatures';
+import { buildFighter, computeMods, familyCounts, guardianFighter, slotCount, slotLinks, type Fighter } from './build';
+import { BAL, feed, genesForTier, maxMealTier } from './data/balance';
 import { guardianDef } from './data/guardians';
 import { heroDef } from './data/heroes';
 import { mutationDef } from './data/mutations';
+import { poolDef, poolDietWeights, type Pool, type PoolKind } from './data/pools';
 import { MAX_SHELL_TIER } from './data/shells';
 import { tenantDef } from './data/tenants';
-import { generateOffers, generateShellChoices, generateShop, registerMaxHp, type Offer, type ShopItem } from './offers';
+import { generateOffers, generateShellChoices, generateShop, registerMaxHp, tenantPrice, type Offer, type ShopItem } from './offers';
 import { createRng, subSeed } from './rng';
-import { CHAPTER_STAGES, creatureTier, spawnTable, stageInfo } from './stages';
+import { CHAPTER_STAGES, spawnTable, stageInfo, type SpawnEntry } from './stages';
 import {
   DIETS,
   zeroDiets,
@@ -54,8 +54,15 @@ export interface CampState {
   offerTaken: boolean;
   shop: ShopItem[];
   rerolls: number;
+  /** A copy of a tenant already on the shell can be ordered once per camp. */
+  ordered?: boolean;
   /** Non-null while the crab has to pick a new shell first. */
   shellChoices: ShellInst[] | null;
+  /** Currents to choose from when the next stage is a pool. */
+  paths?: Pool[];
+  /** Another player's build to spar with; the server attaches it. null = nobody around. */
+  rival?: Extract<Enemy, { kind: 'ghost' }> | null;
+  dueled?: boolean;
 }
 
 export type Enemy =
@@ -88,6 +95,13 @@ export interface RunStats {
   seenTenants: Record<string, number>;
   seenShells: string[];
   guardiansBeaten: string[];
+  /** Feat counters (absent in runs started before they existed). */
+  linksMax?: number;
+  parries?: number;
+  trophies?: number;
+  duelWins?: number;
+  /** A guardian was beaten with at least 80 % health left. */
+  flawless?: boolean;
 }
 
 export type RunPhase = 'hunt' | 'camp' | 'battle' | 'down' | 'ended';
@@ -119,12 +133,22 @@ export interface RunState {
   result: RunResult | null;
   /** Increments with every hunt; part of the hunt token. */
   huntNonce: number;
+  /** Current of the pool being hunted (absent in the first pool of a run). */
+  pool?: Pool | null;
 }
 
 export interface HuntReport {
-  /** Creature id -> number eaten. */
-  eaten: Record<string, number>;
-  nodes: { oyster: number; coral: number; glitter: number };
+  /** Ordered meals as [creature id, tier]; the server replays growth from it. */
+  log?: [string, number][];
+  /** Compact form without order (tests, simulator): creature id -> number eaten at the stage tier. */
+  eaten?: Record<string, number>;
+  nodes: { oyster: number; coral: number; glitter: number; chest?: number };
+  /** Pearls dropped by slain predators. */
+  drops?: number;
+  /** The pool's marked prey was eaten. */
+  trophy?: boolean;
+  /** Bites parried by hiding at the right moment. */
+  parries?: number;
   durationS: number;
   /** HP lost during the pool, absolute, after healing. May be negative (net heal). */
   hpLost: number;
@@ -136,11 +160,15 @@ export type RunAction =
   | { type: 'pick_offer'; index: number; slot?: number }
   | { type: 'skip_offer' }
   | { type: 'buy'; index: number; slot?: number }
+  /** Buys a ★ copy of the tenant sitting in slot `of`. */
+  | { type: 'order'; of: number; slot?: number }
   | { type: 'reroll'; free?: boolean }
   | { type: 'sell'; slot: number }
   | { type: 'move'; from: number; to: number }
   | { type: 'choose_shell'; index: number }
-  | { type: 'descend'; ghost?: Extract<Enemy, { kind: 'ghost' }> }
+  | { type: 'descend'; ghost?: Extract<Enemy, { kind: 'ghost' }>; path?: number }
+  /** Spars with the camp's rival: no lives at stake. */
+  | { type: 'duel' }
   | { type: 'carry_out' }
   | { type: 'battle' }
   | { type: 'second_chance' }
@@ -156,7 +184,8 @@ export type RunEvent =
   | { type: 'shell'; shell: ShellInst }
   | { type: 'heal'; amount: number }
   | { type: 'ko'; lives: number }
-  | { type: 'battle'; result: BattleResult; won: boolean; enemy: Enemy; seed: string; rewards?: { pearls: number; shine: number; trophies: number } }
+  | { type: 'battle'; result: BattleResult; won: boolean; enemy: Enemy; seed: string; duel?: boolean; rewards?: { pearls: number; shine: number; trophies: number } }
+  | { type: 'trophy'; id: string; pearls: number }
   | { type: 'clamped'; what: string }
   | { type: 'ended'; result: RunResult };
 
@@ -310,6 +339,8 @@ function resolveMerges(state: RunState, events: RunEvent[]): void {
 function updateSetStats(state: RunState): void {
   const counts = familyCounts(state.slots);
   for (const d of DIETS) state.stats.maxSet[d] = Math.max(state.stats.maxSet[d], counts[d]);
+  const links = slotLinks(state.slots, state.cfg.heroId).active.length;
+  state.stats.linksMax = Math.max(state.stats.linksMax ?? 0, links);
   for (const t of state.slots) {
     if (t) state.stats.seenTenants[t.id] = Math.max(state.stats.seenTenants[t.id] ?? 0, t.star);
   }
@@ -358,20 +389,26 @@ export interface HuntCaps {
   maxOysters: number;
   maxCorals: number;
   maxGlitter: number;
+  maxChests: number;
   maxDuration: number;
 }
 
+/** Physical limits of a pool of the given length: how much a crab could possibly find and eat. */
 export function huntCaps(durationS: number): HuntCaps {
   const h = BAL.hunt;
   const d = Math.max(0, Math.min(h.hardMaxTime, durationS));
-  const respawns = Math.floor(d / h.nodeRespawnTime);
   return {
-    maxEaten: h.initialSpawn + Math.ceil((h.spawnRate[1] as number) * d) + 2,
-    maxOysters: h.oysters * (1 + respawns),
-    maxCorals: h.corals * (1 + respawns),
-    maxGlitter: 1 + respawns,
+    maxEaten: h.initialSpawn + Math.ceil((h.spawnRate[1] as number) * 1.3 * d) + 6,
+    maxOysters: 3 + Math.floor(d / 8),
+    maxCorals: 4 + Math.floor(d / 6),
+    maxGlitter: 1 + Math.floor(d / 45),
+    maxChests: 1 + Math.floor(d / 40),
     maxDuration: h.hardMaxTime,
   };
+}
+
+export function orderPrice(t: TenantInst): number {
+  return tenantPrice(t.id, 1) + BAL.orderExtra;
 }
 
 /**
@@ -387,46 +424,65 @@ function applyHunt(state: RunState, report: HuntReport, maxDurationS: number | u
     events.push({ type: 'clamped', what: 'duration' });
   }
   const caps = huntCaps(duration);
-  const table = new Map(spawnTable(stage, state.cfg.event?.dietWeights).map((e) => [e.def.id, e]));
+  const pool = poolDef(state.pool);
+  const table = new Map(spawnTable(stage, poolDietWeights(state.pool, state.cfg.event?.dietWeights)).map((e) => [e.def.id, e]));
   const modsBefore = runMods(state);
   const hero = heroDef(state.cfg.heroId);
 
-  // Sanitise: known creatures of this stage only, non-negative integers, total under the cap.
-  const eaten: [string, number][] = [];
-  let total = 0;
-  for (const [id, raw] of Object.entries(report.eaten ?? {})) {
-    const n = Math.floor(Number(raw));
-    if (!(n > 0) || !table.has(id)) {
-      if (n > 0) events.push({ type: 'clamped', what: `creature:${id}` });
-      continue;
+  // Meals in order. The compact form is replayed from the smallest fauna up, like a crab growing into a pool.
+  let log: [string, number][] = [];
+  if (Array.isArray(report.log)) {
+    for (const entry of report.log) {
+      if (Array.isArray(entry)) log.push([String(entry[0]), Math.floor(Number(entry[1]))]);
     }
-    eaten.push([id, n]);
-    total += n;
+  } else {
+    const groups: [string, number, number][] = [];
+    for (const [id, raw] of Object.entries(report.eaten ?? {})) {
+      const n = Math.floor(Number(raw));
+      if (n > 0) groups.push([id, table.get(id)?.tier ?? 0, Math.min(n, caps.maxEaten + 1)]);
+    }
+    groups.sort((a, b) => a[1] - b[1]);
+    for (const [id, tier, n] of groups) for (let i = 0; i < n; i++) log.push([id, tier]);
   }
-  if (total > caps.maxEaten) {
-    const k = caps.maxEaten / total;
-    for (const e of eaten) e[1] = Math.floor(e[1] * k);
+  const unknown = new Set<string>();
+  log = log.filter(([id]) => {
+    if (table.has(id)) return true;
+    unknown.add(id);
+    return false;
+  });
+  for (const id of unknown) events.push({ type: 'clamped', what: `creature:${id}` });
+  if (log.length > caps.maxEaten) {
+    // Thin out evenly so the order of what remains is kept.
+    const k = caps.maxEaten / log.length;
+    log = log.filter((_, i) => Math.floor((i + 1) * k) > Math.floor(i * k));
     events.push({ type: 'clamped', what: 'eaten' });
   }
 
   const lm = lootMult(state, stage, modsBefore);
   const geneBefore: DietMap = { ...state.genes };
-  let xp = 0;
-  for (const [id, n] of eaten) {
-    const def = CREATURE_BY_ID.get(id);
-    if (!def) continue;
-    const tier = creatureTier(stage, def);
-    xp += xpForTier(tier) * n;
-    state.genes[def.diet] += genesForTier(tier) * n * hero.geneMult * (1 + modsBefore.genePct / 100);
-    state.loot.coral += BAL.hunt.coralPerTier * tier * n * lm;
-    state.stats.eatenByDiet[def.diet] += n;
-    state.stats.eatenByCreature[id] = (state.stats.eatenByCreature[id] ?? 0) + n;
-    state.stats.eatenTotal += n;
+  const hpBefore = maxHpOf(state);
+  let predatorMeals = 0;
+  let tierClamped = false;
+  for (const [id, rawTier] of log) {
+    const entry = table.get(id);
+    if (!entry) continue;
+    const top = maxMealTier(state.size, entry.tier);
+    const tier = Math.max(entry.tier, Math.min(top, Number.isFinite(rawTier) ? rawTier : entry.tier));
+    if (tier !== rawTier) tierClamped = true;
+    if (tier > state.size) predatorMeals += 1;
+    const def = entry.def;
+    if (feed(state, tier, (1 + modsBefore.xpPct / 100) * pool.xp * 100 - 100)) events.push({ type: 'grow', size: state.size });
+    const swarm = state.pool?.kind === 'swarm' && state.pool.diet === def.diet ? 1 + pool.swarmGenePct / 100 : 1;
+    state.genes[def.diet] += genesForTier(tier) * hero.geneMult * (1 + modsBefore.genePct / 100) * swarm;
+    state.loot.coral += BAL.hunt.coralPerTier * tier * lm;
+    state.stats.eatenByDiet[def.diet] += 1;
+    state.stats.eatenByCreature[id] = (state.stats.eatenByCreature[id] ?? 0) + 1;
+    state.stats.eatenTotal += 1;
   }
-  state.xp += xp * (1 + modsBefore.xpPct / 100);
+  if (tierClamped && Array.isArray(report.log)) events.push({ type: 'clamped', what: 'tier' });
 
   const rng = createRng(subSeed(state.seed, 'nodes', stage, state.huntNonce));
-  const clampNode = (v: number, cap: number, what: string): number => {
+  const clampNode = (v: unknown, cap: number, what: string): number => {
     const n = Math.max(0, Math.floor(Number(v) || 0));
     if (n > cap) events.push({ type: 'clamped', what });
     return Math.min(n, cap);
@@ -434,22 +490,28 @@ function applyHunt(state: RunState, report: HuntReport, maxDurationS: number | u
   const oysters = clampNode(report.nodes?.oyster, caps.maxOysters, 'oyster');
   const corals = clampNode(report.nodes?.coral, caps.maxCorals, 'coral');
   const glitter = clampNode(report.nodes?.glitter, caps.maxGlitter, 'glitter');
-  let pearls = 0;
-  for (let i = 0; i < oysters; i++) pearls += rng.int(BAL.hunt.oysterPearls[0] as number, BAL.hunt.oysterPearls[1] as number);
-  pearls = Math.round(pearls * (1 + (modsBefore.pearlPct + (state.cfg.event?.pearlPct ?? 0)) / 100));
+  const chests = clampNode(report.nodes?.chest, caps.maxChests, 'chest');
+  const drops = clampNode(report.drops, predatorMeals + 2, 'drops');
+  // The marked prey: one per pool, and only a crab that had time to reach it.
+  let trophyPearls = 0;
+  if (report.trophy === true && duration >= 8) {
+    const prey = trophyOf(state);
+    if (prey) {
+      trophyPearls = BAL.hunt.trophyPearls;
+      state.genes[prey.def.diet] += BAL.hunt.trophyGenes * hero.geneMult;
+      state.stats.trophies = (state.stats.trophies ?? 0) + 1;
+      events.push({ type: 'trophy', id: prey.def.id, pearls: trophyPearls });
+    }
+  }
+  state.stats.parries = (state.stats.parries ?? 0) + clampNode(report.parries, 1 + Math.floor(duration / 3), 'parries');
+  const rawPearls = oysters * BAL.hunt.oysterPearls * pool.oyster + chests * BAL.hunt.chestPearls + drops + trophyPearls;
+  const pearls = Math.round(rawPearls * (1 + (modsBefore.pearlPct + (state.cfg.event?.pearlPct ?? 0)) / 100));
   state.pearls += pearls;
   state.stats.pearlsEarned += pearls;
+  state.loot.coral += chests * BAL.hunt.chestCoral * lm;
   for (let i = 0; i < corals; i++) state.loot.coral += rng.int(BAL.hunt.coralYield[0] as number, BAL.hunt.coralYield[1] as number) * lm;
   for (let i = 0; i < glitter; i++) state.loot.shine += rng.int(BAL.hunt.glitterYield[0] as number, BAL.hunt.glitterYield[1] as number) * lm;
   state.stats.huntSeconds += duration;
-
-  // Growth.
-  const hpBefore = maxHpOf(state);
-  while (state.xp >= xpNeed(state.size)) {
-    state.xp -= xpNeed(state.size);
-    state.size += 1;
-    events.push({ type: 'grow', size: state.size });
-  }
 
   // Gene thresholds -> guaranteed mutation offers.
   for (const d of DIETS) {
@@ -493,9 +555,41 @@ function enterCamp(state: RunState, events: RunEvent[]): void {
     rerolls: 0,
     shellChoices: shellTier > state.shell.tier ? generateShellChoices(state, shellTier, rng) : null,
   };
+  const next = state.stage + 1;
+  if (next <= state.cfg.maxStage && stageInfo(next).kind === 'hunt') state.camp.paths = generatePaths(state, next);
   state.pendingMutations = [];
   state.phase = 'camp';
   state.battle = null;
+}
+
+const PATH_KINDS: readonly PoolKind[] = ['calm', 'pearl', 'swarm', 'nest', 'dark'];
+
+/** Three different currents for the pool at `stage`; a swarm is of a family that lives there. */
+export function generatePaths(state: RunState, stage: number): Pool[] {
+  const rng = createRng(subSeed(state.seed, 'paths', stage));
+  const kinds = PATH_KINDS.slice();
+  const out: Pool[] = [];
+  const diets = [...new Set(spawnTable(stage).map((e) => e.def.diet))];
+  while (out.length < 3 && kinds.length > 0) {
+    const kind = kinds.splice(rng.int(0, kinds.length - 1), 1)[0] as PoolKind;
+    if (kind === 'swarm') {
+      if (diets.length === 0) continue;
+      out.push({ kind, diet: diets[rng.int(0, diets.length - 1)] as Diet });
+    } else out.push({ kind });
+  }
+  return out;
+}
+
+/** The marked prey of the current pool: a creature of the pool's fauna, picked by the run seed. */
+export function trophyOf(state: RunState): { def: SpawnEntry['def'] } | null {
+  const table = spawnTable(state.stage, poolDietWeights(state.pool, state.cfg.event?.dietWeights));
+  if (table.length === 0) return null;
+  const rng = createRng(subSeed(state.seed, 'trophy', state.stage, state.huntNonce));
+  return { def: (table[rng.int(0, table.length - 1)] as SpawnEntry).def };
+}
+
+export function duelPearls(stage: number): number {
+  return BAL.duelPearls + Math.floor(stage / 3);
 }
 
 export function rerollCost(camp: CampState): number {
@@ -664,6 +758,21 @@ export function applyRunAction(
       break;
     }
 
+    case 'order': {
+      const c = campFree();
+      if (c.ordered) fail('order_used');
+      const src = state.slots[action.of];
+      if (!src) fail('empty_slot');
+      if (src.star >= 3) fail('order_max');
+      const price = orderPrice(src);
+      if (state.pearls < price) fail('no_pearls');
+      state.pearls -= price;
+      addTenant(state, { id: src.id, star: 1 }, action.slot, events);
+      c.ordered = true;
+      clampHp(state);
+      break;
+    }
+
     case 'reroll': {
       const c = campFree();
       if (action.free) {
@@ -726,6 +835,7 @@ export function applyRunAction(
         state.phase = 'battle';
         // The camp is kept: a lost battle returns the crab here.
       } else {
+        state.pool = c.paths?.[Math.max(0, Math.min((c.paths?.length ?? 1) - 1, Math.floor(action.path ?? 0)))] ?? null;
         state.camp = null;
         state.battle = null;
         state.phase = 'hunt';
@@ -755,6 +865,7 @@ export function applyRunAction(
         else if (setup.enemy.kind === 'guardian' && !state.stats.guardiansBeaten.includes(setup.enemy.id)) {
           state.stats.guardiansBeaten.push(setup.enemy.id);
         }
+        if (!isGhost && result.hpLeft[0] >= 0.8) state.stats.flawless = true;
         state.stats.maxStage = Math.max(state.stats.maxStage, setup.stage);
         events.push({ type: 'battle', result, won, enemy: setup.enemy, seed, rewards: { pearls, shine: Math.floor(shine), trophies: isGhost ? TROPHY_WIN : 0 } });
         if (setup.stage >= state.cfg.maxStage) {
@@ -778,6 +889,26 @@ export function applyRunAction(
           state.phase = 'camp';
         }
       }
+      break;
+    }
+
+    case 'duel': {
+      const c = campFree();
+      if (!c.rival) fail('no_rival');
+      if (c.dueled) fail('duel_used');
+      const seed = subSeed(state.seed, 'duel', c.after);
+      const result = simulateBattle(runFighter(state), enemyFighter(c.rival), seed);
+      const won = result.winner === 0;
+      c.dueled = true;
+      let pearls = 0;
+      if (won) {
+        pearls = duelPearls(c.after);
+        state.pearls += pearls;
+        state.stats.pearlsEarned += pearls;
+        state.stats.ghostWins += 1;
+        state.stats.duelWins = (state.stats.duelWins ?? 0) + 1;
+      } else state.stats.ghostLosses += 1;
+      events.push({ type: 'battle', result, won, enemy: c.rival, seed, duel: true, rewards: { pearls, shine: 0, trophies: won ? TROPHY_WIN : -TROPHY_LOSS } });
       break;
     }
 
@@ -812,11 +943,12 @@ export function applyRunAction(
 }
 
 /** State safe to send to the client: no seed, so offers cannot be predicted. */
-export type PublicRun = Omit<RunState, 'seed'> & { huntSeed: string; /** Number of the last applied action; the next request sends seq + 1. */ seq: number };
+export type PublicRun = Omit<RunState, 'seed'> & { /** Creature id of the pool's marked prey (while hunting). */ trophyId?: string; huntSeed: string; /** Number of the last applied action; the next request sends seq + 1. */ seq: number };
 
 export function publicRun(state: RunState, seq = 0): PublicRun {
   const { seed, ...rest } = state;
-  return { ...rest, seq, huntSeed: String(createRng(subSeed(seed, 'hunt', state.stage, state.huntNonce)).int(0, 2 ** 31 - 1)) };
+  const prey = state.phase === 'hunt' ? trophyOf(state) : null;
+  return { ...rest, ...(prey ? { trophyId: prey.def.id } : {}), seq, huntSeed: String(createRng(subSeed(seed, 'hunt', state.stage, state.huntNonce)).int(0, 2 ** 31 - 1)) };
 }
 
 export const RUN_CHAPTER_STAGES = CHAPTER_STAGES;

@@ -6,6 +6,8 @@ export * from './data/creatures';
 export * from './data/guardians';
 export * from './data/heroes';
 export * from './data/mutations';
+export * from './data/pools';
+export * from './data/feats';
 export * from './data/sets';
 export * from './data/shells';
 export * from './data/tenants';

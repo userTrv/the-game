@@ -24,6 +24,9 @@ export interface GuardianDef {
   /** Below this HP fraction the guardian gets +haste percent, once. */
   enrage?: { below: number; hastePct: number };
   boss?: boolean;
+  /** Families whose abilities hurt it more / less (see BAL.weakMult, BAL.resistMult). */
+  weak: readonly Diet[];
+  resist: readonly Diet[];
 }
 
 export const GUARDIANS: readonly GuardianDef[] = [
@@ -35,6 +38,8 @@ export const GUARDIANS: readonly GuardianDef[] = [
     armor: 0,
     crit: 0,
     abilities: [{ kind: 'zap', cd: 6.5, v: 15, first: 4.5, family: 'spike' }],
+    weak: ['sting'],
+    resist: ['venom'],
   },
   {
     id: 'gate_crab',
@@ -47,6 +52,8 @@ export const GUARDIANS: readonly GuardianDef[] = [
       { kind: 'shield', cd: 8, v: 50, first: 3, family: 'armor' },
       { kind: 'burst', cd: 4, v: 12, family: 'spike' },
     ],
+    weak: ['venom'],
+    resist: ['spike'],
   },
   {
     id: 'octopus',
@@ -60,6 +67,8 @@ export const GUARDIANS: readonly GuardianDef[] = [
       { kind: 'poison', cd: 5, v: 7, first: 4, family: 'venom' },
       { kind: 'pull', cd: 11, v: 30, dur: 3, first: 7, family: 'soft' },
     ],
+    weak: ['spike'],
+    resist: ['glow'],
   },
   {
     id: 'angler',
@@ -75,6 +84,8 @@ export const GUARDIANS: readonly GuardianDef[] = [
     ],
     enrage: { below: 0.4, hastePct: 40 },
     boss: true,
+    weak: ['glow'],
+    resist: ['sting'],
   },
 ];
 

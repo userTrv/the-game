@@ -37,22 +37,22 @@ const q = (id: string, period: 'daily' | 'weekly', metric: QuestMetric, need: nu
 });
 
 export const QUESTS: readonly QuestDef[] = [
-  q('d_eat_60', 'daily', 'eat_total', 60, 40, 0, 20),
-  ...DIETS.map((d) => q(`d_eat_${d}`, 'daily', `eat_${d}`, 25, 45, 1, 20)),
-  q('d_merge2', 'daily', 'merge2', 2, 50, 1, 25),
-  q('d_win', 'daily', 'win_battle', 1, 50, 1, 25),
-  q('d_carry', 'daily', 'carry_out', 1, 40, 1, 20),
-  q('d_pearls', 'daily', 'pearls', 25, 40, 0, 20),
-  q('d_runs', 'daily', 'runs', 2, 45, 1, 20),
-  q('d_upgrade', 'daily', 'upgrade', 1, 30, 1, 20),
-  q('w_eat_500', 'weekly', 'eat_total', 500, 250, 6, 100),
-  q('w_merge3', 'weekly', 'merge3', 1, 300, 8, 120),
-  q('w_set4', 'weekly', 'set4', 4, 250, 6, 100, 'max'),
-  q('w_stage9', 'weekly', 'reach_stage', 9, 300, 8, 120, 'max'),
-  q('w_wins', 'weekly', 'win_battle', 8, 280, 6, 100),
-  q('w_ghost', 'weekly', 'ghost_win', 3, 260, 8, 110),
-  q('w_kraken', 'weekly', 'kraken_hit', 5, 220, 6, 100),
-  q('w_runs', 'weekly', 'runs', 10, 240, 5, 100),
+  q('d_eat_60', 'daily', 'eat_total', 60, 14, 0, 20),
+  ...DIETS.map((d) => q(`d_eat_${d}`, 'daily', `eat_${d}`, 25, 16, 0, 20)),
+  q('d_merge2', 'daily', 'merge2', 2, 20, 1, 25),
+  q('d_win', 'daily', 'win_battle', 1, 18, 1, 25),
+  q('d_carry', 'daily', 'carry_out', 1, 14, 0, 20),
+  q('d_pearls', 'daily', 'pearls', 25, 14, 0, 20),
+  q('d_runs', 'daily', 'runs', 2, 16, 0, 20),
+  q('d_upgrade', 'daily', 'upgrade', 1, 12, 0, 20),
+  q('w_eat_500', 'weekly', 'eat_total', 500, 90, 2, 100),
+  q('w_merge3', 'weekly', 'merge3', 1, 120, 3, 120),
+  q('w_set4', 'weekly', 'set4', 4, 90, 2, 100, 'max'),
+  q('w_stage9', 'weekly', 'reach_stage', 9, 120, 3, 120, 'max'),
+  q('w_wins', 'weekly', 'win_battle', 8, 100, 2, 100),
+  q('w_ghost', 'weekly', 'ghost_win', 3, 100, 3, 110),
+  q('w_kraken', 'weekly', 'kraken_hit', 5, 80, 2, 100),
+  q('w_runs', 'weekly', 'runs', 10, 90, 2, 100),
 ];
 
 export const QUEST_BY_ID: ReadonlyMap<string, QuestDef> = new Map(QUESTS.map((x) => [x.id, x]));
@@ -176,10 +176,10 @@ export const DEFAULT_EVENTS: readonly Omit<LiveEventConfig, 'startsAt' | 'endsAt
     modifier: { dietWeights: { sting: 2 } },
     featuredDiet: 'sting',
     rankRewards: [
-      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_jelly_king' },
-      { upTo: 10, reward: { coral: 900, shine: 35 } },
-      { upTo: 100, reward: { coral: 450, shine: 15 } },
-      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+      { upTo: 1, reward: { coral: 750, shine: 40 }, cosmetic: 'title_jelly_king' },
+      { upTo: 10, reward: { coral: 450, shine: 22 } },
+      { upTo: 100, reward: { coral: 220, shine: 10 } },
+      { upTo: 100000, reward: { coral: 70, shine: 3 } },
     ],
   },
   {
@@ -189,10 +189,10 @@ export const DEFAULT_EVENTS: readonly Omit<LiveEventConfig, 'startsAt' | 'endsAt
     modifier: { dietWeights: { armor: 1.6 }, pearlPct: 35 },
     featuredDiet: 'armor',
     rankRewards: [
-      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_pearl_baron' },
-      { upTo: 10, reward: { coral: 900, shine: 35 } },
-      { upTo: 100, reward: { coral: 450, shine: 15 } },
-      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+      { upTo: 1, reward: { coral: 750, shine: 40 }, cosmetic: 'title_pearl_baron' },
+      { upTo: 10, reward: { coral: 450, shine: 22 } },
+      { upTo: 100, reward: { coral: 220, shine: 10 } },
+      { upTo: 100000, reward: { coral: 70, shine: 3 } },
     ],
   },
   {
@@ -202,10 +202,10 @@ export const DEFAULT_EVENTS: readonly Omit<LiveEventConfig, 'startsAt' | 'endsAt
     modifier: { dietWeights: { glow: 2 }, lootPct: 15 },
     featuredDiet: 'glow',
     rankRewards: [
-      { upTo: 1, reward: { coral: 1500, shine: 60 }, cosmetic: 'title_lamplighter' },
-      { upTo: 10, reward: { coral: 900, shine: 35 } },
-      { upTo: 100, reward: { coral: 450, shine: 15 } },
-      { upTo: 100000, reward: { coral: 150, shine: 5 } },
+      { upTo: 1, reward: { coral: 750, shine: 40 }, cosmetic: 'title_lamplighter' },
+      { upTo: 10, reward: { coral: 450, shine: 22 } },
+      { upTo: 100, reward: { coral: 220, shine: 10 } },
+      { upTo: 100000, reward: { coral: 70, shine: 3 } },
     ],
   },
 ];
@@ -223,10 +223,10 @@ export interface KrakenConfig {
 
 export const KRAKEN_ATTACKS_PER_DAY = 3;
 export const KRAKEN_DEFAULT_THRESHOLDS: KrakenConfig['thresholds'] = [
-  { pct: 25, reward: { coral: 150, shine: 4 } },
-  { pct: 50, reward: { coral: 300, shine: 8 } },
-  { pct: 75, reward: { coral: 500, shine: 14 } },
-  { pct: 100, reward: { coral: 900, shine: 30 } },
+  { pct: 25, reward: { coral: 70, shine: 3 } },
+  { pct: 50, reward: { coral: 150, shine: 6 } },
+  { pct: 75, reward: { coral: 250, shine: 10 } },
+  { pct: 100, reward: { coral: 450, shine: 20 } },
 ];
 
 /** The Kraken never dies inside one fight: the damage dealt in the fight is the contribution. */

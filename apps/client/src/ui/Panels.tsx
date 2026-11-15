@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import { api } from '../api';
 import { duration, lang, local, num, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
+import { canFullscreen, fullscreen, setFullscreen } from '../platform/fullscreen';
 import { platformKind, tg } from '../platform/telegram';
 import { sfx } from '../sound';
 import { applyAuth, battle, busy, ended, errorText, isTelegram, liveops, meta, panel, player, refreshMe, run, screen, setLang, setSettings, settings, showToast, track } from '../state';
@@ -126,9 +127,9 @@ export function EventsSheet(): JSX.Element | null {
   return (
     <Sheet title={t('events.title')} onClose={close} id="events-sheet">
       <div class="tabs">
-        <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>🌊 {t('nav.events')}</button>
-        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>🐙 {t('kraken.title')}</button>
-        <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>🏆 {t('league.title')}</button>
+        <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>{t('nav.events')}</button>
+        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button>
+        <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>{t('league.title')}</button>
       </div>
       <div class="scroll list" style={{ minHeight: '330px' }}>
         {tab.value === 'event' ? (
@@ -174,7 +175,7 @@ export function EventsSheet(): JSX.Element | null {
         {tab.value === 'league' && l ? (
           <>
             <div class="panel light col">
-              <div class="row between"><span class="h2">🏆 {t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
+              <div class="row between"><span class="h2">{t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
               <div class="muted small">{t('league.desc')}</div>
               <div class="row wrap" style={{ gap: '4px' }}>{LEAGUES.map((x) => <span class="chip tiny" key={x.id} style={{ opacity: x.id === l.league.league ? 1 : 0.5 }}>{t(`league.${x.id}`)} {x.min}+</span>)}</div>
               {l.league.season ? <div class="tiny muted">{t('league.season', { t: duration(l.league.season.endsAt - now) })}{l.league.myRank ? ` · ${t('events.rank', { n: l.league.myRank })}` : ''}</div> : null}
@@ -259,7 +260,7 @@ export function ShopSheet(): JSX.Element | null {
       <div class="scroll list" style={{ minHeight: '360px' }}>
         {chestLeft ? (
           <div class="item">
-            <span style={{ fontSize: '30px' }}>🎁</span>
+            <Spr id="node/chest" size={40} />
             <div class="grow"><b>{t('shop.chest')}</b><div class="row tiny muted">{t('shop.chest.desc')} · <CostView cost={DAILY_CHEST_REWARD} /></div></div>
             <Btn class="sm gold" id="chest-btn" onClick={() => void chest()}><Spr id="icon/ad" size={18} />{t('common.free')}</Btn>
           </div>
@@ -416,6 +417,7 @@ export function SettingsSheet(): JSX.Element | null {
       <div class="scroll list">
         <div class="item"><span style={{ width: '90px' }}>{t('settings.music')}</span><input type="range" min="0" max="1" step="0.05" value={s.music} id="set-music" onInput={(e) => setSettings({ music: Number((e.target as HTMLInputElement).value) })} /></div>
         <div class="item"><span style={{ width: '90px' }}>{t('settings.sfx')}</span><input type="range" min="0" max="1" step="0.05" value={s.sfx} id="set-sfx" onInput={(e) => setSettings({ sfx: Number((e.target as HTMLInputElement).value) })} /></div>
+        {canFullscreen() && !tg() ? <div class="item between"><span>{t('settings.fullscreen')}</span><Toggle on={fullscreen.value} id="set-fullscreen" onChange={(v) => void setFullscreen(v)} /></div> : null}
         <div class="item between"><span>{t('settings.haptics')}</span><Toggle on={s.haptics} id="set-haptics" onChange={(v) => setSettings({ haptics: v })} /></div>
         <div class="item between"><span>{t('settings.calm')}</span><Toggle on={s.calm} id="set-calm" onChange={(v) => setSettings({ calm: v })} /></div>
         <div class="item between">

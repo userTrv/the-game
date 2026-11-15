@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyRunAction, startRun, publicRun, huntCaps, runRewards, tenantWeights, generateOffers, createRng, maxHpOf, RunError,
-  type RunState, type HuntReport, BAL, xpNeed,
+  type RunState, type HuntReport, BAL, xpNeed, feed, xpFalloff, orderPrice, newProfile, gardenUnlocked, setGardenOff, runConfigFor, GARDEN_MIN_POOL,
 } from '../src';
 import { fullConfig } from './helpers';
 
@@ -228,5 +228,54 @@ describe('run reducer', () => {
 
   it('xp curve is monotonic', () => {
     for (let s = 1; s < 30; s++) expect(xpNeed(s + 1)).toBeGreaterThan(xpNeed(s));
+  });
+});
+
+describe('v2 hunt rules', () => {
+  it('small food feeds a big crab worse, so camping an early pool does not pay', () => {
+    const small = { size: 1, xp: 0 };
+    const big = { size: 6, xp: 0 };
+    feed(small, 1, 0);
+    feed(big, 1, 0);
+    expect(big.xp).toBeLessThan(small.xp * 0.1);
+    expect(xpFalloff(3, 3)).toBe(1);
+    expect(xpFalloff(3, 5)).toBe(1);
+  });
+
+  it('replays an ordered log, clamps stalker tiers and counts pearls from every source', () => {
+    const s0 = startRun('r1', 'seed', fullConfig());
+    const log: [string, number][] = [];
+    for (let i = 0; i < 20; i++) log.push(['moon_jelly', 1]);
+    log.push(['lionfish', 99]);
+    const { state, events } = applyRunAction(s0, {
+      type: 'hunt_done',
+      report: { log, nodes: { oyster: 2, coral: 0, glitter: 0, chest: 1 }, drops: 1, durationS: 60, hpLost: 0, ko: false },
+    });
+    expect(state.stats.eatenTotal).toBe(21);
+    expect(events.some((e) => e.type === 'clamped' && e.what === 'tier')).toBe(true);
+    expect(state.pearls).toBe(s0.pearls + 2 * BAL.hunt.oysterPearls + BAL.hunt.chestPearls + 1);
+    // 20 jellies and one clamped predator: far from the size a tier-99 meal would give.
+    expect(state.size).toBeLessThan(8);
+  });
+
+  it('orders a copy of a tenant on the shell once per camp', () => {
+    let s = applyRunAction(startRun('r1', 'seed', fullConfig()), { type: 'hunt_done', report: { eaten: { moon_jelly: 6 }, nodes: { oyster: 0, coral: 0, glitter: 0 }, durationS: 30, hpLost: 0, ko: false } }).state;
+    if (s.camp!.shellChoices) s = applyRunAction(s, { type: 'choose_shell', index: 0 }).state;
+    s.slots[0] = { id: 'anemone', star: 1 };
+    s.pearls = 50;
+    const before = s.pearls;
+    const r = applyRunAction(s, { type: 'order', of: 0 });
+    expect(r.state.pearls).toBe(before - orderPrice({ id: 'anemone', star: 1 }));
+    expect(r.state.slots.filter((t) => t?.id === 'anemone')).toHaveLength(2);
+    expect(() => applyRunAction(r.state, { type: 'order', of: 0 })).toThrow('order_used');
+  });
+
+  it('the garden deck narrows the pool but never below the minimum', () => {
+    const p = { ...newProfile(0), tutorialDone: true };
+    const all = gardenUnlocked(p);
+    const off = all.slice(0, all.length - GARDEN_MIN_POOL);
+    const q = setGardenOff(p, off);
+    expect(runConfigFor(q, 'hermit').tenantPool).toHaveLength(Math.min(GARDEN_MIN_POOL, all.length));
+    expect(() => setGardenOff(p, all)).toThrow('garden_min');
   });
 });

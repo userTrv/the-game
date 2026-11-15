@@ -237,12 +237,15 @@ export function simulateBattle(a: Fighter, b: Fighter, seed: string, opts: Battl
   const cast = (from: Side, ab: AbilityInst): void => {
     const me = sides[from];
     log?.push({ t: time, e: 'cast', s: from, src: ab.src, kind: ab.kind });
-    applyEffect(from, ab.src, ab.kind, ab.v, ab.dur, ab.n);
-    if (ab.also) applyEffect(from, ab.src, ab.also.kind, ab.also.v, ab.also.dur, 0);
+    // A guardian's weakness or resistance to a family scales what that family's abilities do to it.
+    const taken = sides[from === 0 ? 1 : 0].f.taken?.[ab.family] ?? 1;
+    const scaled = (kind: ActiveKind, v: number): number => (kind === 'zap' || kind === 'nova' || kind === 'burst' || kind === 'poison' ? v * taken : v);
+    applyEffect(from, ab.src, ab.kind, scaled(ab.kind, ab.v), ab.dur, ab.n);
+    if (ab.also) applyEffect(from, ab.src, ab.also.kind, scaled(ab.also.kind, ab.also.v), ab.also.dur, 0);
     if (ab.family === 'sting' && me.f.stormEvery > 0 && (ab.kind === 'zap' || ab.kind === 'nova' || ab.kind === 'burst')) {
       me.stingCasts += 1;
       if (me.stingCasts % me.f.stormEvery === 0) {
-        damage(from, SRC_STORM, ab.v * BAL.stormMult);
+        damage(from, SRC_STORM, ab.v * BAL.stormMult * taken);
         stun(from === 0 ? 1 : 0, BAL.stormStun);
       }
     }
@@ -269,16 +272,16 @@ export function simulateBattle(a: Fighter, b: Fighter, seed: string, opts: Battl
     if (crit) dmg *= me.f.critMult;
     const dealt = damage(from, SRC_CLAW, dmg, { crit, punch });
     if (punch && me.f.punch) stun(foe, me.f.punch.stun);
-    if (me.f.zapOnHit > 0) damage(from, SRC_CLAW, me.f.zapOnHit, { silent: true });
-    if (me.f.poisonOnHit > 0) target.poison += me.f.poisonOnHit;
+    if (me.f.zapOnHit > 0) damage(from, SRC_CLAW, me.f.zapOnHit * (target.f.taken?.sting ?? 1), { silent: true });
+    if (me.f.poisonOnHit > 0) target.poison += me.f.poisonOnHit * (target.f.taken?.venom ?? 1);
     if (me.f.shieldOnHit > 0) me.shield += me.f.shieldOnHit * me.f.shieldMult;
     if (me.f.leech > 0) heal(from, SRC_CLAW, dealt * me.f.leech, true);
     if (crit && me.f.blindOnCrit > 0) target.blindT = Math.max(target.blindT, me.f.blindOnCrit);
 
     // Reactions of the target.
     const back = target.f.thorns + dealt * target.f.reflect;
-    if (back > 0) damage(foe, SRC_THORNS, back, { silent: back < 1 });
-    if (target.f.poisonThorns > 0) me.poison += target.f.poisonThorns;
+    if (back > 0) damage(foe, SRC_THORNS, back * (me.f.taken?.spike ?? 1), { silent: back < 1 });
+    if (target.f.poisonThorns > 0) me.poison += target.f.poisonThorns * (me.f.taken?.venom ?? 1);
     for (let i = 0; i < target.f.abilities.length; i++) {
       const ab = target.f.abilities[i] as AbilityInst;
       if (ab.kind === 'burst' && (target.cds[i] as number) <= 0 && target.stunT <= 0) {

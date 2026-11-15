@@ -9,6 +9,8 @@ export interface ShellDef {
   unlock: number;
   /** Never offered; only the starting home. */
   starter?: boolean;
+  /** Feat that has to be done once before the shell is offered. */
+  feat?: string;
 }
 
 export const SHELLS: readonly ShellDef[] = [
@@ -25,7 +27,7 @@ export const SHELLS: readonly ShellDef[] = [
   { id: 'nautilus', slotDelta: 0, mods: { cdrPct: 12, speedPct: 6 }, unlock: 4 },
   { id: 'lamp', slotDelta: 0, mods: { power: { sting: 25, glow: 15 }, magnetPct: 40 }, unlock: 4 },
   { id: 'flask', slotDelta: 0, mods: { power: { venom: 30 }, poisonOnHit: 0.5 }, unlock: 5 },
-  { id: 'crown', slotDelta: 0, mods: { power: { sting: 12, spike: 12, glow: 12, armor: 12, venom: 12, soft: 12 } }, unlock: 5 },
+  { id: 'crown', slotDelta: 0, mods: { power: { sting: 12, spike: 12, glow: 12, armor: 12, venom: 12, soft: 12 } }, unlock: 0, feat: 'set6' },
 ];
 
 export const SHELL_BY_ID: ReadonlyMap<string, ShellDef> = new Map(SHELLS.map((s) => [s.id, s]));

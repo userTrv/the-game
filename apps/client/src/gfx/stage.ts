@@ -2,10 +2,12 @@ import type { Container } from 'pixi.js';
 import { Application } from 'pixi.js';
 
 /**
- * One Pixi application for the whole game. Scenes are containers scaled so that the screen is
- * always VIEW_W world units wide; height varies with the device aspect ratio.
+ * One Pixi application for the whole game. Scenes are containers scaled so that the screen is at
+ * least MIN_W world units wide and MIN_H tall: a phone in portrait gets exactly MIN_W across,
+ * a desktop window gets MIN_H down and as much width as it has.
  */
-export const VIEW_W = 390;
+const MIN_W = 390;
+const MIN_H = 700;
 
 export interface Scene {
   root: Container;
@@ -18,10 +20,15 @@ export interface Scene {
 let app: Application | null = null;
 let hostEl: HTMLElement | null = null;
 let current: Scene | null = null;
+let viewW = MIN_W;
 let viewH = 844;
 let frames = 0;
 let frameTime = 0;
 let worst = 0;
+
+export function viewWidth(): number {
+  return viewW;
+}
 
 export function viewHeight(): number {
   return viewH;
@@ -37,10 +44,11 @@ function layout(): void {
   // CSS size of the host, not the renderer's: the renderer may still hold its pre-resize size.
   const w = hostEl?.clientWidth || app.renderer.width / app.renderer.resolution;
   const h = hostEl?.clientHeight || app.renderer.height / app.renderer.resolution;
-  const k = w / VIEW_W;
+  const k = Math.min(w / MIN_W, h / MIN_H);
+  viewW = w / k;
   viewH = h / k;
   app.stage.scale.set(k);
-  current?.resize?.(VIEW_W, viewH);
+  current?.resize?.(viewW, viewH);
 }
 
 export async function initStage(host: HTMLElement): Promise<void> {
@@ -48,7 +56,7 @@ export async function initStage(host: HTMLElement): Promise<void> {
   app = new Application();
   await app.init({
     resizeTo: host,
-    backgroundColor: 0x0e3a66,
+    backgroundColor: 0x02141a,
     antialias: false,
     // Capped at 2: beyond that phones only burn battery.
     resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -81,7 +89,7 @@ export function setScene(scene: Scene | null): void {
   current = scene;
   if (scene) {
     app.stage.addChild(scene.root);
-    scene.resize?.(VIEW_W, viewH);
+    scene.resize?.(viewW, viewH);
   }
 }
 
@@ -99,7 +107,8 @@ export function takeFps(): { fps: number; worstMs: number } {
 }
 
 export function setPaused(paused: boolean): void {
-  if (!app) return;
+  // The ticker does not exist until the renderer has finished starting.
+  if (!app?.ticker) return;
   if (paused) app.ticker.stop();
   else app.ticker.start();
 }

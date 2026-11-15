@@ -87,7 +87,14 @@ export function startDirector(): void {
       music(b.enemy.kind === 'guardian' && (b.enemy.id === 'angler' || b.enemy.id === 'kraken') ? 'boss' : 'battle');
       void loadAtlas('big').then(() => {
         if (key !== next) return;
-        setScene(new BattleScene(b, () => undefined));
+        try {
+          setScene(new BattleScene(b, () => undefined));
+        } catch (err) {
+          // A broken replay must not strand the player on an empty screen.
+          console.error(err);
+          battle.value = null;
+          screen.value = b.kraken ? 'home' : ended.value ? 'result' : screenForRun(run.value);
+        }
       });
     } else if (next === 'show:run' && r) {
       const info = stageInfo(Math.max(1, r.camp?.after ?? r.stage));

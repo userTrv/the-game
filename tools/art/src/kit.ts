@@ -2,47 +2,51 @@
  * Art kit: every sprite in the game is drawn with these helpers, so the whole reef shares one art
  * direction. See docs/ART.md.
  *
- *  - Outline: one dark plum colour, round joins, width proportional to the sprite.
- *  - Light: from the top-left. Volumes are radial gradients (light core up-left, darker rim),
- *    plus a soft white highlight blob and an optional bounce light at the bottom-right.
- *  - Faces: big round eyes with a glint; mouths are tiny.
+ * The look is a living micro-world seen in dark water (think of the cell stage of Spore):
+ *  - Bodies are glass: a translucent core, denser towards the rim, so overlapping parts and the water
+ *    behind show through.
+ *  - No dark outline. Every shape ends in a thin bright rim of its own colour, as if lit from inside.
+ *  - Eyes are small dark nuclei with a light ring; there are no faces or expressions.
+ *  - `OUTLINE` survives only as the dark ink for nuclei and fine detail.
  */
-export const OUTLINE = '#2b2140';
+export const OUTLINE = '#0b1230';
+/** How see-through a body is at its centre, half-way and at the rim. */
+const GLASS = [0.46, 0.7, 0.94] as const;
 
 export type Diet = 'sting' | 'spike' | 'glow' | 'armor' | 'venom' | 'soft';
 
 /** Diet hues: base, light, dark, accent. Readable against all three biomes. */
 export const DIET: Record<Diet, { base: string; light: string; dark: string; accent: string }> = {
-  sting: { base: '#ffc93c', light: '#fff0a8', dark: '#e08a1e', accent: '#7be3ff' },
-  spike: { base: '#ff6a55', light: '#ffb199', dark: '#c93a3a', accent: '#ffe08a' },
-  glow: { base: '#3fe0d0', light: '#c6fff4', dark: '#1a9aa8', accent: '#f6ff8f' },
-  armor: { base: '#5b8cff', light: '#b8d0ff', dark: '#3558c4', accent: '#ffd38a' },
-  venom: { base: '#8fd93f', light: '#dcff9f', dark: '#4f9a2a', accent: '#c05cff' },
-  soft: { base: '#ff8fb8', light: '#ffd3e3', dark: '#d9578c', accent: '#fff3c4' },
+  sting: { base: '#ffc24a', light: '#fff0b0', dark: '#c9781e', accent: '#7be3ff' },
+  spike: { base: '#ff6b5e', light: '#ffb9a6', dark: '#b8363f', accent: '#ffe08a' },
+  glow: { base: '#3fe6d6', light: '#c6fff4', dark: '#16889c', accent: '#f6ff8f' },
+  armor: { base: '#5f93ff', light: '#bcd4ff', dark: '#2f52b8', accent: '#ffd38a' },
+  venom: { base: '#8fe04a', light: '#dcff9f', dark: '#3f8a2c', accent: '#c88cff' },
+  soft: { base: '#ff8cc0', light: '#ffd3e6', dark: '#c94f8c', accent: '#fff3c4' },
 };
 
 export const PAL = {
   white: '#ffffff',
   cream: '#fff6e0',
-  sand: '#f3d9a4',
-  sandDark: '#d9b074',
-  shell: '#f6e2c8',
-  shellDark: '#d8b08c',
-  crab: '#ff7a4d',
-  crabLight: '#ffb48a',
-  crabDark: '#d9482f',
+  sand: '#8fb8b0',
+  sandDark: '#4f7f86',
+  shell: '#e9d8c8',
+  shellDark: '#a98a9c',
+  crab: '#ff8457',
+  crabLight: '#ffc09a',
+  crabDark: '#c9463a',
   pearl: '#fdf7ff',
   coral: '#ff8a7a',
   shine: '#ffe066',
-  metal: '#9fb3c8',
-  metalDark: '#62788f',
-  wood: '#b07a4a',
-  woodDark: '#7a4e2c',
+  metal: '#7f9bb8',
+  metalDark: '#465f7c',
+  wood: '#7a6a72',
+  woodDark: '#473c4c',
   glass: '#a8f0e6',
   bone: '#f2ead8',
   ink: '#3a2d5c',
-  rock: '#8a8fb0',
-  rockDark: '#5a5f85',
+  rock: '#55648c',
+  rockDark: '#2f3a5c',
 };
 
 // --- Colour maths ------------------------------------------------------------------------------
@@ -61,8 +65,8 @@ export function mix(a: string, b: string, t: number): string {
   return hex(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
 }
 export const lighten = (c: string, t: number) => mix(c, '#ffffff', t);
-/** Darkening shifts toward plum instead of black, which keeps shadows colourful. */
-export const darken = (c: string, t: number) => mix(c, '#3a1f5c', t);
+/** Darkening shifts toward deep-water navy instead of black, which keeps shadows colourful. */
+export const darken = (c: string, t: number) => mix(c, '#0a1638', t);
 
 // --- Sprite builder ----------------------------------------------------------------------------
 
@@ -90,6 +94,9 @@ export class Art {
     this.sw = sw ?? Math.max(1.6, Math.min(w, h) * 0.045);
   }
 
+  /** Rim colour of the shape being drawn. */
+  private rimOf: string | null = null;
+
   private gid(): string {
     uid += 1;
     return `g${uid}`;
@@ -101,8 +108,9 @@ export class Art {
     const d = o.depth ?? 1;
     this.defs.push(
       `<radialGradient id="${id}" cx="${o.lx ?? 0.36}" cy="${o.ly ?? 0.3}" r="0.85" fx="${o.lx ?? 0.36}" fy="${o.ly ?? 0.3}">` +
-        `<stop offset="0" stop-color="${lighten(color, 0.38 * d)}"/><stop offset="0.5" stop-color="${color}"/>` +
-        `<stop offset="1" stop-color="${darken(color, 0.34 * d)}"/></radialGradient>`,
+        `<stop offset="0" stop-color="${lighten(color, 0.5 * d)}" stop-opacity="${GLASS[0]}"/>` +
+        `<stop offset="0.55" stop-color="${color}" stop-opacity="${GLASS[1]}"/>` +
+        `<stop offset="1" stop-color="${darken(color, 0.22 * d)}" stop-opacity="${GLASS[2]}"/></radialGradient>`,
     );
     return `url(#${id})`;
   }
@@ -127,8 +135,10 @@ export class Art {
   }
 
   private attrs(fill: string, o: ShapeOpts): string {
-    const sw = o.sw ?? this.sw;
-    const stroke = o.noStroke ? '' : ` stroke="${o.stroke ?? OUTLINE}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"`;
+    // The rim: thin and bright, in the shape's own colour.
+    const sw = (o.sw ?? this.sw) * 0.55;
+    const rim = o.stroke ?? (this.rimOf ?? '#dff4ff');
+    const stroke = o.noStroke ? '' : ` stroke="${rim}" stroke-opacity="0.85" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"`;
     const op = o.opacity !== undefined ? ` opacity="${o.opacity}"` : '';
     const tr = o.rot ? ` transform="rotate(${o.rot[0]} ${o.rot[1]} ${o.rot[2]})"` : '';
     return ` fill="${fill}"${stroke}${op}${tr}`;
@@ -136,12 +146,14 @@ export class Art {
 
   /** Filled path with volume shading and outline. */
   path(d: string, color: string, o: ShapeOpts = {}): this {
+    this.rimOf = color.startsWith('#') ? lighten(color, 0.55) : null;
     const fill = o.flat ? color : color.startsWith('url(') ? color : this.vol(color, o);
     this.body.push(`<path d="${d}"${this.attrs(fill, o)}/>`);
     return this;
   }
 
   ell(cx: number, cy: number, rx: number, ry: number, color: string, o: ShapeOpts = {}): this {
+    this.rimOf = color.startsWith('#') ? lighten(color, 0.55) : null;
     const fill = o.flat ? color : color.startsWith('url(') ? color : this.vol(color, o);
     this.body.push(`<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"${this.attrs(fill, o)}/>`);
     return this;
@@ -153,15 +165,16 @@ export class Art {
 
   /** Open stroke (tentacles, whiskers, legs). */
   line(d: string, color: string, width: number, o: { outline?: boolean; opacity?: number } = {}): this {
-    if (o.outline !== false) {
-      this.body.push(`<path d="${d}" fill="none" stroke="${OUTLINE}" stroke-width="${width + this.sw * 1.7}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    if (o.outline !== false && color.startsWith('#')) {
+      // A soft halo instead of an outline: strands glow in the dark.
+      this.body.push(`<path d="${d}" fill="none" stroke="${lighten(color, 0.3)}" stroke-opacity="0.22" stroke-width="${width + this.sw * 1.6}" stroke-linecap="round" stroke-linejoin="round"/>`);
     }
     this.body.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"${o.opacity !== undefined ? ` opacity="${o.opacity}"` : ''}/>`);
     return this;
   }
 
   /** White highlight blob. */
-  hi(cx: number, cy: number, rx: number, ry: number, rot = -25, opacity = 0.55): this {
+  hi(cx: number, cy: number, rx: number, ry: number, rot = -25, opacity = 0.4): this {
     this.body.push(`<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#fff" opacity="${opacity}" transform="rotate(${rot} ${cx} ${cy})"/>`);
     return this;
   }
@@ -177,28 +190,23 @@ export class Art {
     return this;
   }
 
-  /** Cute eye: white ball, dark pupil looking along (dx, dy), glint. */
+  /** An eye is a small dark nucleus with a light ring and a glint: alive, but not a face. */
   eye(cx: number, cy: number, r: number, o: { dx?: number; dy?: number; lid?: number; angry?: boolean } = {}): this {
-    const dx = (o.dx ?? 0.25) * r * 0.45;
-    const dy = (o.dy ?? 0.1) * r * 0.45;
-    this.body.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff" stroke="${OUTLINE}" stroke-width="${Math.min(this.sw, r * 0.5)}"/>`);
-    this.body.push(`<circle cx="${cx + dx}" cy="${cy + dy}" r="${r * 0.58}" fill="${OUTLINE}"/>`);
-    this.body.push(`<circle cx="${cx + dx - r * 0.2}" cy="${cy + dy - r * 0.24}" r="${r * 0.22}" fill="#fff"/>`);
-    if (o.angry) {
-      this.body.push(`<path d="M${cx - r * 1.2} ${cy - r * 1.15} L${cx + r * 1.1} ${cy - r * 0.45}" stroke="${OUTLINE}" stroke-width="${this.sw * 1.2}" stroke-linecap="round" fill="none"/>`);
-    }
+    const k = 0.62;
+    const dx = (o.dx ?? 0.25) * r * 0.2;
+    const dy = (o.dy ?? 0.1) * r * 0.2;
+    this.body.push(`<circle cx="${cx}" cy="${cy}" r="${r * k}" fill="${OUTLINE}" fill-opacity="0.85" stroke="${o.angry ? '#ff8a8a' : '#e8fbff'}" stroke-opacity="0.8" stroke-width="${Math.max(0.5, r * 0.16)}"/>`);
+    this.body.push(`<circle cx="${cx + dx - r * 0.16}" cy="${cy + dy - r * 0.18}" r="${r * 0.15}" fill="#fff" opacity="0.9"/>`);
     return this;
   }
 
-  /** Small smile or frown. */
-  mouth(cx: number, cy: number, w: number, curve = 1): this {
-    this.body.push(`<path d="M${cx - w / 2} ${cy} Q${cx} ${cy + w * 0.5 * curve} ${cx + w / 2} ${cy}" fill="none" stroke="${OUTLINE}" stroke-width="${this.sw * 0.8}" stroke-linecap="round"/>`);
+  /** Faces are gone: creatures have no mouths or blush. Kept so sprite code stays untouched. */
+  mouth(_cx: number, _cy: number, _w: number, _curve = 1): this {
     return this;
   }
 
-  /** Blush cheek. */
-  cheek(cx: number, cy: number, r: number): this {
-    return this.spot(cx, cy, r, r * 0.6, '#ff5d7a', 0.35);
+  cheek(_cx: number, _cy: number, _r: number): this {
+    return this;
   }
 
   group(transform: string, fn: () => void): this {

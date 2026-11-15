@@ -66,7 +66,8 @@ test('first session: pools, camp, merge, guardian, carry-out, town, purchase, ad
     await reachCamp(page);
     await page.click('#offer-0');
     await page.waitForTimeout(800);
-    await page.click('#descend-btn');
+    // The next stage is a pool: the camp offers three currents instead of one button.
+    await page.click('#path-0');
   });
 
   await test.step('pool 2 and the first merge', async () => {

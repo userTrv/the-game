@@ -24,6 +24,11 @@ export const BAL = {
   // --- Tenants -------------------------------------------------------------------------------
   /** Bonus for a tenant sitting in its preferred row. */
   rowBonus: 1.25,
+  /** Damage multiplier of a family a guardian is weak to / resists. */
+  weakMult: 1.5,
+  resistMult: 0.6,
+  /** Links can shorten a neighbour's cooldown by at most this share. */
+  linkHasteCap: 50,
   /** Non-magnitude effects (durations, percents) get this share of family power. */
   softPowerShare: 0.4,
 
@@ -53,6 +58,8 @@ export const BAL = {
   /** Loot multiplier grows with depth: 1 + k * (stage - 1). */
   lootDepthK: 0.12,
   pearlToCoral: 2,
+  /** Pearls for beating the rival at a camp: base + stage / 3. */
+  duelPearls: 2,
   rerollBase: 1,
   rerollStep: 1,
   /** Tenant price in pearls by rarity (index = rarity - 1). */
@@ -68,23 +75,26 @@ export const BAL = {
   offerRarityWeight: [10, 5, 2] as readonly number[],
   offerRarityStageBonus: [0, 0.25, 0.2] as readonly number[],
   offerGeneK: 0.08,
-  offerOwnedMult: 1.7,
-  offerNearMergeMult: 1.5,
+  offerOwnedMult: 2.5,
+  offerNearMergeMult: 2,
+  /** Ordering a copy of a tenant already on the shell costs its price plus this. */
+  orderExtra: 2,
   offerMutationChance: 0.3,
   offerHealChance: 0.12,
 
   // --- Hunt ----------------------------------------------------------------------------------
   hunt: {
-    arenaW: 620,
-    arenaH: 1100,
-    /** Seconds until danger reaches 1. */
+    /** The pool has no walls: the world is generated in square chunks around the crab. */
+    chunk: 512,
+    /** Seconds until danger reaches 1; it keeps growing past that up to dangerMax. */
     dangerTime: 150,
+    dangerMax: 3,
     minLeaveTime: 12,
     hardMaxTime: 480,
-    initialSpawn: 22,
+    initialSpawn: 20,
     maxAlive: 34,
     /** Creatures per second at danger 0 and 1. */
-    spawnRate: [0.8, 1.1] as readonly number[],
+    spawnRate: [0.9, 1.3] as readonly number[],
     creatureHpBase: 6,
     creatureHpPow: 1.6,
     creatureDmgBase: 4,
@@ -92,15 +102,37 @@ export const BAL = {
     biteInterval: 1.0,
     eatRadius: 26,
     magnetRadius: 70,
-    oysters: 5,
-    corals: 6,
-    glitterChance: 0.5,
-    oysterPearls: [1, 2] as readonly number[],
+    /**
+     * Food smaller than the crab feeds it worse: index = size - tier (0 = same tier), the last value
+     * applies to everything smaller. Camping an early pool for levels is pointless.
+     */
+    xpFalloff: [1, 0.7, 0.4, 0.2, 0.08] as readonly number[],
+    /**
+     * Stalkers: predators whose tier follows the crab (size + 1, later + 2), so they can never be
+     * outgrown. They start at this danger and come more often as it rises.
+     */
+    stalkerFrom: 0.3,
+    stalkerInterval: [22, 7] as readonly number[],
+    stalkerExtraTierAt: 1.4,
+    stalkerMaxAlive: 4,
+    /** The marked prey of a pool: pearls and genes of its family for eating it. */
+    trophyPearls: 3,
+    trophyGenes: 3,
+    /** A predator freezes this long before biting; hiding inside the window parries the bite. */
+    biteWindup: 0.55,
+    parryStun: 2,
+    /** Pearls: nothing respawns. */
+    oysterPearls: 1,
+    chestPearls: 3,
+    chestCoral: 12,
+    /** Chance that a slain regular predator drops a pearl; stalkers always do. */
+    predatorPearlChance: 0.35,
     coralYield: [3, 6] as readonly number[],
     glitterYield: [1, 2] as readonly number[],
     /** Coral dropped per eaten creature tier. */
     coralPerTier: 0.25,
-    nodeRespawnTime: 45,
+    /** Distance from the entry point (world units) at which the world is twice as rich and dangerous. */
+    richDistance: 2200,
   },
 } as const;
 
@@ -130,4 +162,28 @@ export function sizeScale(size: number, per: number): number {
 /** Gene points for eating a creature of the given tier. */
 export function genesForTier(tier: number): number {
   return 1 + Math.floor((tier - 1) / 4);
+}
+
+/** Share of a meal's XP the crab gets when it is `size` and the food is of `tier`. */
+export function xpFalloff(size: number, tier: number): number {
+  const f = BAL.hunt.xpFalloff;
+  const gap = Math.max(0, Math.floor(size - tier));
+  return f[Math.min(gap, f.length - 1)] as number;
+}
+
+/** Highest tier a meal may have for a crab of this size: stalkers are size + 2 at most. */
+export function maxMealTier(size: number, stageTier: number): number {
+  return Math.max(stageTier, size + 2);
+}
+
+/** Adds one meal to a growing crab (shared by the client HUD and the server so sizes always agree). */
+export function feed(g: { size: number; xp: number }, tier: number, xpPct: number): boolean {
+  g.xp += xpForTier(tier) * xpFalloff(g.size, tier) * (1 + xpPct / 100);
+  let grew = false;
+  while (g.xp >= xpNeed(g.size)) {
+    g.xp -= xpNeed(g.size);
+    g.size += 1;
+    grew = true;
+  }
+  return grew;
 }

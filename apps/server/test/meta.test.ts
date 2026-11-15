@@ -45,7 +45,7 @@ describe('town and meta', () => {
     await h.call('POST', '/api/dev/grant', { coral: 5000, shine: 200 }, a.token);
     let p = (await h.call<P>('POST', '/api/town/upgrade', { building: 'corf' }, a.token)).body.player;
     expect(p.profile.buildings.corf).toBe(1);
-    expect(p.profile.coral).toBe(4960);
+    expect(p.profile.coral).toBe(4950);
     expect((await h.call<Err>('POST', '/api/town/talent', { id: 'tough_shell' }, a.token)).body.error.code).toBe('talent_locked');
     await h.call('POST', '/api/town/upgrade', { building: 'school' }, a.token);
     p = (await h.call<P>('POST', '/api/town/talent', { id: 'tough_shell' }, a.token)).body.player;
@@ -69,6 +69,8 @@ describe('town and meta', () => {
     const [row] = await h.handle.db.select().from(players).where(eq(players.id, a.player.id));
     const q = row!.quests!;
     q.daily[0]!.progress = 99999;
+    // The run above may have finished the second quest by chance; this test needs it open.
+    q.daily[1]!.progress = 0;
     await h.handle.db.update(players).set({ quests: q }).where(eq(players.id, a.player.id));
     const claim = await h.call<P & { reward: { passXp: number } }>('POST', '/api/quests/claim', { id: q.daily[0]!.id }, a.token);
     expect(claim.status).toBe(200);

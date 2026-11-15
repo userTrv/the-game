@@ -51,6 +51,19 @@ export interface PassiveAbility {
 
 export type AbilityDef = ActiveAbility | PassiveAbility;
 
+/**
+ * How a tenant works with its neighbours on the shell grid (see `gridNeighbors`):
+ *  aura - every neighbour (of `family`, or any) gets +v % power, or -v % cooldown for stat 'haste'
+ *  bond - the tenant itself gets +v % power per neighbour of `family` (or per any neighbour)
+ *  solo - the tenant itself gets +v % power while no neighbouring cell is occupied
+ */
+export interface LinkDef {
+  kind: 'aura' | 'bond' | 'solo';
+  stat: 'power' | 'haste';
+  family?: Diet;
+  v: Triple;
+}
+
 export type Role = 'front' | 'back' | 'any';
 
 export interface TenantDef {
@@ -62,6 +75,9 @@ export interface TenantDef {
   ability: AbilityDef;
   /** Tenant garden level that adds it to the pool (0 = available from the start). */
   unlock: number;
+  link?: LinkDef;
+  /** Feat that has to be done once before the tenant can show up (on top of `unlock`). */
+  feat?: string;
 }
 
 /** Kinds whose magnitude is a flat amount and scales with size and family power. */

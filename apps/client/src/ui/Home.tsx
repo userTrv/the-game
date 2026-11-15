@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals';
 import {
-  ALMANAC_REWARD_MULT, BUILDING_DEFS, BUILDINGS, CORF_RATE_PER_HOUR, HEROES, LIGHTHOUSE_STAGES, MILESTONES, SHELLS, TALENTS, TENANTS, CREATURES, GUARDIANS,
-  milestoneProgress, talentCost, unlockedHeroes, upgradeBlocker, upgradeCost,
+  ALMANAC_REWARD_MULT, BUILDING_DEFS, BUILDINGS, CORF_RATE_PER_HOUR, HEROES, LIGHTHOUSE_STAGES, MILESTONES, QUEST_BY_ID, SHELLS, TALENTS, TENANTS, CREATURES, GUARDIANS,
+  featDone, milestoneProgress, talentCost, unlockedHeroes, upgradeBlocker, upgradeCost,
   type BuildingId, type PlayerView,
 } from '@shellter/shared';
 import type { JSX } from 'preact';
@@ -11,7 +11,19 @@ import { name, num, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
 import { sfx } from '../sound';
 import { busy, haptic, liveops, meta, panel, player, refreshMe, run, screen, screenForRun, showToast, startRun, track } from '../state';
-import { Btn, CostView, flyIcons, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
+import { Btn, CostView, flyIcons, Ico, modLines, Res, Sheet, Spr, Stars, tenantText } from './kit';
+
+/** Where each building's chamber sits on the shelter illustration: centre x, y and width, in % of the image. */
+const ROOMS: Record<BuildingId, [number, number, number]> = {
+  lighthouse: [50, 18.7, 16],
+  garden: [49, 29, 22],
+  school: [35, 40.5, 20],
+  lab: [60, 37, 16],
+  workshop: [61, 50.5, 22],
+  hatchery: [33, 57, 22],
+  corf: [33, 67.5, 21],
+  almanac: [63, 81, 20],
+};
 
 function levelLine(b: BuildingId, level: number): string {
   switch (b) {
@@ -116,7 +128,7 @@ export function HeroesSheet(): JSX.Element | null {
               <Spr id={`crab/${h.id}/body`} size={54} style={{ filter: ok ? undefined : 'grayscale(1) brightness(0.6)' }} />
               <div class="grow">
                 <b>{t(`hero.${h.id}`)}</b>
-                <div class="muted tiny">{ok ? t(`hero.${h.id}.desc`) : t('hero.locked', { n: h.unlock })}</div>
+                <div class="muted tiny">{ok ? t(`hero.${h.id}.desc`) : h.feat && !featDone(p.profile, h.feat) ? t(`feat.${h.feat}`) : t('hero.locked', { n: h.unlock })}</div>
               </div>
               {ok ? <Btn class={`sm ${sel ? 'ghost' : 'ok'}`} id={`hero-${h.id}`} disabled={sel} onClick={() => void meta(() => api.hero(h.id))}>{sel ? t('hero.selected') : t('hero.select')}</Btn> : <Spr id="icon/lock" size={26} />}
             </div>
@@ -176,7 +188,7 @@ export function AlmanacSheet(): JSX.Element | null {
       <div class="row"><Res kind="coral" value={p.profile.coral} id="almanac-coral" /><Res kind="shine" value={p.profile.shine} /></div>
       <div class="tabs">
         {(['milestones', 'creatures', 'tenants', 'shells', 'guardians'] as const).map((k) => (
-          <button class={tab.value === k ? 'on' : ''} key={k} onClick={() => (tab.value = k)}>{k === 'milestones' ? '🏅' : t(`almanac.${k}`)}</button>
+          <button class={tab.value === k ? 'on' : ''} key={k} onClick={() => (tab.value = k)}>{k === 'milestones' ? <Ico id="medal" size={18} /> : t(`almanac.${k}`)}</button>
         ))}
       </div>
       <div class="scroll" style={{ minHeight: '300px' }}>
@@ -205,10 +217,14 @@ export function AlmanacSheet(): JSX.Element | null {
             }) : null}
             {tab.value === 'tenants' ? TENANTS.map((x) => {
               const s = al.tenants[x.id] ?? 0;
+              const feat = x.feat && !featDone(p.profile, x.feat) ? x.feat : null;
+              if (feat) return <button class="cell unknown feat" key={x.id} onClick={() => showToast(t(`feat.${feat}`))}><Spr id={`tenant/${x.id}`} size={40} /><Ico id="lock" size={16} /><span>{t(`feat.${feat}`)}</span></button>;
               return <div class={`cell ${s ? '' : 'unknown'}`} key={x.id} title={s ? tenantText(x.id, 1) : ''}><Spr id={`tenant/${x.id}`} size={40} /><span>{s ? name('tenant', x.id) : t('almanac.unknown')}</span>{s ? <Stars n={s} /> : null}</div>;
             }) : null}
             {tab.value === 'shells' ? SHELLS.map((x) => {
               const ok = al.shells.includes(x.id);
+              const feat = x.feat && !featDone(p.profile, x.feat) ? x.feat : null;
+              if (feat) return <button class="cell unknown feat" key={x.id} onClick={() => showToast(t(`feat.${feat}`))}><Spr id={`shell/${x.id}`} size={48} /><Ico id="lock" size={16} /><span>{t(`feat.${feat}`)}</span></button>;
               return <div class={`cell ${ok ? '' : 'unknown'}`} key={x.id}><Spr id={`shell/${x.id}`} size={48} /><span>{ok ? name('shell', x.id) : t('almanac.unknown')}</span></div>;
             }) : null}
             {tab.value === 'guardians' ? GUARDIANS.map((x) => {
@@ -235,9 +251,10 @@ export function HomeView(): JSX.Element | null {
     if (r) screen.value = screenForRun(r);
     else void startRun(p.profile.heroId);
   };
-  const questsReady = [...p.quests.daily, ...p.quests.weekly].filter((q) => !q.claimed && q.progress > 0).length;
+  const questsReady = [...p.quests.daily, ...p.quests.weekly].filter((q) => !q.claimed && q.progress >= (QUEST_BY_ID.get(q.id)?.need ?? Infinity)).length;
   const firstTime = p.profile.stats.runs <= 1 && p.profile.buildings.lighthouse === 0;
   const lanterns = p.cosmetics.equipped.town === 'town_lanterns';
+  const ev = liveops.value?.event;
   return (
     <div class="screen pass" id="home">
       <div class="topbar">
@@ -245,43 +262,37 @@ export function HomeView(): JSX.Element | null {
         <Res kind="shine" value={p.profile.shine} id="res-shine" />
         <Res kind="trophy" value={p.profile.trophies} />
         <div class="grow" />
-        <button class="icon-btn" id="inbox-btn" aria-label={t('inbox.title')} onClick={() => (panel.value = 'inbox')}>✉{p.inboxUnread > 0 ? <span class="badge">{p.inboxUnread}</span> : null}</button>
-        <button class="icon-btn" id="settings-btn" aria-label={t('settings.title')} onClick={() => (panel.value = 'settings')}>⚙</button>
+        <button class="icon-btn" id="inbox-btn" aria-label={t('inbox.title')} onClick={() => (panel.value = 'inbox')}><Ico id="inbox" />{p.inboxUnread > 0 ? <span class="badge">{p.inboxUnread}</span> : null}</button>
+        <button class="icon-btn" id="settings-btn" aria-label={t('settings.title')} onClick={() => (panel.value = 'settings')}><Ico id="settings" /></button>
       </div>
-      <div class="col center" style={{ marginTop: '8px', gap: '2px' }}>
-        <div class="title" style={{ fontSize: '26px' }}>{t('app.name')}</div>
-        <div class="muted small shadow-text">{p.cosmetics.equipped.title ? `«${t(`cosmetic.${p.cosmetics.equipped.title}`)}» ` : ''}{p.name} · {p.profile.stats.bestStage > 0 ? t('home.best', { n: p.profile.stats.bestStage }) : t('app.tagline')}</div>
+      <div class="shelter" id="town">
+        <div class="shelter-art" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/img/shelter.jpg)`, filter: lanterns ? 'drop-shadow(0 0 14px rgba(255, 220, 120, 0.5))' : undefined }}>
+          {BUILDINGS.map((b) => {
+            const lv = p.profile.buildings[b];
+            const [x, y, w] = ROOMS[b];
+            const locked = lv === 0 && (b === 'corf' || b === 'school');
+            const cls = canUpgrade(p, b) ? 'up' : b === 'corf' && p.corf.full ? 'full' : '';
+            return (
+              <button class={`room ${locked ? 'locked' : ''} ${cls}`} key={b} id={`bld-${b}`} aria-label={t(`building.${b}`)} style={{ left: `${x}%`, top: `${y}%`, width: `${w}%` }} onClick={() => { sfx('ui_open'); panel.value = { building: b }; }}>
+                {locked ? <Spr id="icon/lock" size={22} /> : null}
+                <span class="lv">{lv}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      {firstTime ? <div class="hint shadow-text" style={{ marginTop: '10px', fontSize: '14px' }} id="home-tut">{t('tut.town')}</div> : null}
-      <div class="grow" />
-      {liveops.value?.event ? (
-        <button class="chip" style={{ alignSelf: 'center', marginBottom: '8px' }} id="event-banner" onClick={() => (panel.value = 'events')}>
-          🌊 {liveops.value.event.config.title[p.lang]}
-        </button>
-      ) : null}
-      <div class="town" id="town" style={lanterns ? { filter: 'drop-shadow(0 0 10px rgba(255, 220, 120, 0.55))' } : undefined}>
-        {BUILDINGS.map((b) => {
-          const lv = p.profile.buildings[b];
-          return (
-            <button class={`bld ${lv === 0 && (b === 'corf' || b === 'school') ? 'locked' : ''}`} key={b} id={`bld-${b}`} onClick={() => { sfx('ui_open'); panel.value = { building: b }; }}>
-              <span class="lv">{lv}</span>
-              {canUpgrade(p, b) ? <span class="up">↑</span> : b === 'corf' && p.corf.full ? <span class="up" style={{ background: 'var(--gold)' }}>!</span> : null}
-              <Spr id={`building/${b}`} size={70} />
-              <span class="nm">{t(`building.${b}`)}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div class="row between" style={{ margin: '8px 0' }}>
+      {firstTime ? <div class="hint" style={{ marginTop: 0, marginBottom: '8px', fontSize: '14px' }} id="home-tut">{t('tut.town')}</div> : null}
+      <div class="row between" style={{ margin: '0 0 8px' }}>
         <button class="chip" id="hero-chip" onClick={() => (panel.value = 'heroes')}><Spr id={`crab/${p.profile.heroId}/body`} size={26} />{t(`hero.${p.profile.heroId}`)}</button>
+        {ev ? <button class="chip" id="event-banner" onClick={() => (panel.value = 'events')}>{ev.config.title[p.lang]}</button> : null}
         <span class="chip tiny">{depth > 100 ? t('home.endless') : t('home.depth', { n: depth })}</span>
       </div>
       <div class="nav">
-        <button id="nav-quests" onClick={() => (panel.value = 'quests')}><span class="em">📜</span>{t('nav.quests')}{questsReady > 0 ? <span class="badge">{questsReady}</span> : null}</button>
-        <button id="nav-events" onClick={() => (panel.value = 'events')}><span class="em">🐙</span>{t('nav.events')}</button>
+        <button id="nav-quests" onClick={() => (panel.value = 'quests')}><Ico id="quests" />{t('nav.quests')}{questsReady > 0 ? <span class="badge">{questsReady}</span> : null}</button>
+        <button id="nav-events" onClick={() => (panel.value = 'events')}><Ico id="events" />{t('nav.events')}</button>
         <button class="play" id="play-btn" disabled={busy.value} onClick={() => { sfx('ui_open'); play(); }}>{r ? t('home.continue') : t('home.play')}</button>
-        <button id="nav-almanac" onClick={() => (panel.value = 'almanac')}><span class="em">📖</span>{t('almanac.title').split(' ')[0]}</button>
-        <button id="nav-shop" onClick={() => (panel.value = 'shop')}><span class="em">🛍</span>{t('nav.shop')}</button>
+        <button id="nav-almanac" onClick={() => (panel.value = 'almanac')}><Ico id="almanac" />{t('almanac.title').split(' ')[0]}</button>
+        <button id="nav-shop" onClick={() => (panel.value = 'shop')}><Ico id="shop" />{t('nav.shop')}</button>
       </div>
     </div>
   );

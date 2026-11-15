@@ -32,17 +32,20 @@ const c = (coral: number, shine = 0): Cost => ({ coral, shine });
 export const BUILDING_DEFS: Record<BuildingId, BuildingDef> = {
   lighthouse: {
     id: 'lighthouse',
-    costs: [c(60), c(260, 6), c(800, 25), c(2400, 80)],
+    costs: [c(80), c(520, 10), c(2600, 45), c(9500, 150)],
     requires: [undefined, { bestStage: 6 }, { bestStage: 9 }, { chapterCleared: true }],
   },
-  garden: { id: 'garden', costs: [c(50), c(160, 3), c(420, 10), c(1000, 28), c(2200, 60)] },
-  lab: { id: 'lab', costs: [c(70), c(220, 4), c(600, 14), c(1500, 40)] },
-  workshop: { id: 'workshop', costs: [c(60), c(180, 3), c(460, 10), c(1100, 28), c(2400, 60)] },
-  hatchery: { id: 'hatchery', costs: [c(90), c(380, 10), c(900, 26), c(2200, 70)] },
-  corf: { id: 'corf', costs: [c(40), c(150, 2), c(400, 8), c(1000, 22), c(2200, 50)] },
-  school: { id: 'school', costs: [c(80, 2), c(300, 8), c(800, 22), c(2000, 55)] },
-  almanac: { id: 'almanac', costs: [c(50), c(250, 5), c(900, 20)] },
+  garden: { id: 'garden', costs: [c(60), c(260, 4), c(950, 16), c(3200, 50), c(10000, 140)] },
+  lab: { id: 'lab', costs: [c(90), c(380, 6), c(1500, 24), c(5200, 80)] },
+  workshop: { id: 'workshop', costs: [c(70), c(300, 5), c(1100, 18), c(3600, 55), c(11000, 150)] },
+  hatchery: { id: 'hatchery', costs: [c(120), c(650, 14), c(2400, 45), c(8000, 130)] },
+  corf: { id: 'corf', costs: [c(50), c(240, 3), c(900, 14), c(3000, 45), c(9000, 120)] },
+  school: { id: 'school', costs: [c(100, 3), c(520, 12), c(2000, 40), c(7000, 110)] },
+  almanac: { id: 'almanac', costs: [c(70), c(600, 10), c(3200, 50)] },
 };
+
+/** The garden is a deck: tenants can be switched off, but the pool never gets smaller than this. */
+export const GARDEN_MIN_POOL = 8;
 
 export const LIGHTHOUSE_STAGES = [3, 6, 9, 12, 9999] as const;
 export const CORF_RATE_PER_HOUR = [0, 12, 22, 36, 55, 80] as const;

@@ -67,6 +67,18 @@ async function pickGhost(tx: Tx, row: PlayerRow, state: RunState, stage: number)
   return g ? { kind: 'ghost', ghostId: g.id, name: g.name, build: g.build, power: g.power } : null;
 }
 
+/** The rival swimming by a camp: the closest build other players (or bots) brought to the same stage. */
+async function pickRival(tx: Tx, row: PlayerRow, state: RunState, stage: number): Promise<Extract<Enemy, { kind: 'ghost' }> | null> {
+  const power = ratePower(runFighter(state));
+  const [g] = await tx
+    .select()
+    .from(ghosts)
+    .where(and(eq(ghosts.stage, stage), or(isNull(ghosts.playerId), ne(ghosts.playerId, row.id))))
+    .orderBy(sql`abs(${ghosts.power} - ${power})`)
+    .limit(1);
+  return g ? { kind: 'ghost', ghostId: g.id, name: g.name, build: g.build, power: g.power } : null;
+}
+
 async function saveGhost(tx: Tx, now: number, row: PlayerRow, state: RunState, stage: number): Promise<void> {
   const build = { ...buildOf(state), name: row.name, skin: { crab: row.cosmetics.equipped.crab, shell: row.cosmetics.equipped.shell } };
   const power = ratePower(runFighter(state));
@@ -108,7 +120,8 @@ async function finishRun(tx: Tx, ctx: Ctx, row: PlayerRow, run: RunRow, state: R
   await track(tx, now, row.id, 'run_end', {
     hero: state.cfg.heroId, stage: state.stats.maxStage, result: state.result, seconds: Math.round((now - run.startedAt) / 1000),
     huntSeconds: Math.round(state.stats.huntSeconds), diets: state.stats.eatenByDiet, sets: state.stats.maxSet, merges: state.stats.merges,
-    coral: summary.coral, shine: summary.shine, tutorial: state.cfg.tutorial,
+    coral: summary.coral, shine: summary.shine, tutorial: state.cfg.tutorial, feats: summary.newFeats,
+    pool: state.pool?.kind, trophies: state.stats.trophies ?? 0, parries: state.stats.parries ?? 0, duels: state.stats.duelWins ?? 0, links: state.stats.linksMax ?? 0,
   });
   return ended;
 }
@@ -167,8 +180,16 @@ export async function runAction(ctx: Ctx, playerId: string, runId: string, seq: 
     if (clamped.length > 0) await track(tx, now, playerId, 'suspicious', { runId, stage: run.state.stage, what: clamped.map((c) => (c.type === 'clamped' ? c.what : '')) });
     const battle = events.find((e) => e.type === 'battle');
     if (battle && battle.type === 'battle') {
-      await track(tx, now, playerId, 'battle', { stage: run.state.battle?.stage, enemy: battle.enemy.kind === 'guardian' ? battle.enemy.id : 'ghost', won: battle.won, hero: state.cfg.heroId });
-      if (battle.won && run.state.battle) await saveGhost(tx, now, row, run.state, run.state.battle.stage);
+      await track(tx, now, playerId, 'battle', { stage: run.state.battle?.stage, enemy: battle.enemy.kind === 'guardian' ? battle.enemy.id : 'ghost', won: battle.won, hero: state.cfg.heroId, duel: battle.duel === true });
+    }
+    // Every camp leaves the player's build behind as a rival for others and brings one of theirs.
+    const camp = state.phase === 'camp' ? state.camp : null;
+    if (camp && !state.cfg.tutorial) {
+      if (run.state.camp?.after !== camp.after) await saveGhost(tx, now, row, state, camp.after);
+      if (camp.after >= 2 && !camp.rival && !camp.dueled) {
+        const rival = await pickRival(tx, row, state, camp.after);
+        if (rival) state = { ...state, camp: { ...camp, rival } };
+      }
     }
 
     const response: RunActionResponse = { run: state.phase === 'ended' ? null : publicRun(state, seq), events: events.filter((e) => e.type !== 'clamped') };

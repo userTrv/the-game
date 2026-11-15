@@ -130,8 +130,12 @@ const int = z.number().int();
 const index = int.min(0).max(64);
 
 export const HuntReportSchema = z.object({
-  eaten: z.record(z.string().max(40), int.min(0).max(100000)),
-  nodes: z.object({ oyster: int.min(0).max(10000), coral: int.min(0).max(10000), glitter: int.min(0).max(10000) }),
+  log: z.array(z.tuple([z.string().max(40), int.min(0).max(1000)])).max(5000).optional(),
+  eaten: z.record(z.string().max(40), int.min(0).max(100000)).optional(),
+  nodes: z.object({ oyster: int.min(0).max(10000), coral: int.min(0).max(10000), glitter: int.min(0).max(10000), chest: int.min(0).max(10000).optional() }),
+  drops: int.min(0).max(10000).optional(),
+  trophy: z.boolean().optional(),
+  parries: int.min(0).max(10000).optional(),
   durationS: z.number().min(0).max(100000),
   hpLost: z.number().min(-1e7).max(1e7),
   ko: z.boolean(),
@@ -142,11 +146,13 @@ export const ClientRunActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pick_offer'), index, slot: index.optional() }),
   z.object({ type: z.literal('skip_offer') }),
   z.object({ type: z.literal('buy'), index, slot: index.optional() }),
+  z.object({ type: z.literal('order'), of: index, slot: index.optional() }),
   z.object({ type: z.literal('reroll'), adIntentId: z.string().max(64).optional() }),
   z.object({ type: z.literal('sell'), slot: index }),
   z.object({ type: z.literal('move'), from: index, to: index }),
   z.object({ type: z.literal('choose_shell'), index }),
-  z.object({ type: z.literal('descend') }),
+  z.object({ type: z.literal('descend'), path: index.optional() }),
+  z.object({ type: z.literal('duel') }),
   z.object({ type: z.literal('carry_out') }),
   z.object({ type: z.literal('battle') }),
   z.object({ type: z.literal('second_chance'), adIntentId: z.string().max(64).optional() }),
@@ -165,6 +171,7 @@ export const DoubleLootBody = z.object({ runId: z.string().max(64), adIntentId: 
 export const UpgradeBody = z.object({ building: z.enum(['lighthouse', 'garden', 'lab', 'workshop', 'hatchery', 'corf', 'school', 'almanac']) });
 export const IdBody = z.object({ id: z.string().min(1).max(64) });
 export const HeroBody = z.object({ heroId: z.string().max(32) });
+export const GardenBody = z.object({ off: z.array(z.string().max(40)).max(100) });
 export const CorfBody = z.object({ adIntentId: z.string().max(64).optional() });
 export const PassClaimBody = z.object({ level: int.min(1).max(100), track: z.enum(['free', 'premium']) });
 export const KrakenClaimBody = z.object({ pct: int.min(1).max(100) });
