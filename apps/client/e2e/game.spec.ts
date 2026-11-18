@@ -53,7 +53,7 @@ async function reachCamp(page: Page): Promise<void> {
   }
 }
 
-test('first session: pools, camp, merge, guardian, carry-out, town, purchase, ad', async ({ page }) => {
+test('first session: pools, camp, merge, guardian, carry-out, town, ad unlock, chest', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
 
@@ -116,12 +116,12 @@ test('first session: pools, camp, merge, guardian, carry-out, town, purchase, ad
     await page.locator('#building-sheet .icon-btn').first().click();
   });
 
-  await test.step('Stars purchase through the mock Bot API', async () => {
+  await test.step('a cosmetic is unlocked view by view with rewarded ads', async () => {
     await page.click('#nav-shop');
-    await expect(page.locator('#buy-crab_azure')).toBeEnabled();
-    await page.click('#buy-crab_azure');
-    // Goods arrive only after the bot forwards successful_payment to the server.
-    await expect(page.locator('#buy-crab_azure .price')).not.toContainText('75', { timeout: 40_000 });
+    const btn = page.locator('#unlock-btn-merge_rainbow');
+    await expect(btn).toContainText('0/4');
+    await btn.click();
+    await expect(btn).toContainText('1/4', { timeout: 20_000 });
   });
 
   await test.step('daily chest for a rewarded ad', async () => {

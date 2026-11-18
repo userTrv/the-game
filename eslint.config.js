@@ -5,6 +5,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/dist-yandex/**',
       '**/node_modules/**',
       '**/coverage/**',
       'apps/server/drizzle/**',

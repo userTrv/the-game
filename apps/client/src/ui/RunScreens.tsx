@@ -11,6 +11,7 @@ import { battleScene, hunt, showcase } from '../director';
 import { frame } from '../gfx/assets';
 import { name, num, stat, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
+import { IS_YANDEX } from '../platform/yandex';
 import { battleHud, battleSpeed, buildOfRun } from '../scenes/battle';
 import { huntHud } from '../scenes/hunt';
 import { sfx } from '../sound';
@@ -921,7 +922,7 @@ export function ResultView(): JSX.Element | null {
       <div class="col" style={{ marginTop: '10px' }}>
         {canDouble ? <Btn class="gold wide" id="double-btn" onClick={() => void double()}><Spr id="icon/ad" size={22} />{t('result.double')}</Btn> : null}
         <div class="row">
-          <Btn class="ghost" id="share-btn" onClick={share}>{t('result.share')}</Btn>
+          {!IS_YANDEX ? <Btn class="ghost" id="share-btn" onClick={share}>{t('result.share')}</Btn> : null}
           <Btn class="go grow" id="home-btn" onClick={() => { ended.value = null; lastEvents.value = []; screen.value = 'home'; }}>{t('result.home')} ▸</Btn>
         </div>
       </div>
