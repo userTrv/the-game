@@ -52,7 +52,7 @@ pnpm balance   # симулятор баланса, см. docs/BALANCE.md
 | `tools/art` | Спрайты кодом и запекание в атласы |
 | `tools/balance` | Симулятор баланса |
 | `tools/mock-telegram` | Мок Telegram Bot API для разработки и тестов |
-| `tools/yandex` | Проверка и упаковка архива для Яндекс Игр |
+| `tools/yandex` | Проверка и упаковка архива для Яндекс Игр, иконка и обложка для консоли |
 | `tools/dev` | Запуск всего одной командой |
 | `deploy` | Пример Caddyfile |
 | `docs` | Документация |
@@ -82,6 +82,7 @@ docker compose --profile bot up -d bot
 | [docs/INTERNAL_API.md](docs/INTERNAL_API.md) | Обмен между сервером и ботом |
 | [docs/SETUP.md](docs/SETUP.md) | Что настроить руками перед запуском |
 | [docs/YANDEX.md](docs/YANDEX.md) | Сборка для Яндекс Игр, требования, места для рекламы |
+| [docs/YANDEX-CONSOLE.md](docs/YANDEX-CONSOLE.md) | Тексты, иконка и обложка для консоли Яндекс Игр |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Принятые решения и причины |
 | [docs/REPORT.md](docs/REPORT.md) | Итоговый отчёт |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Журнал прогресса |
