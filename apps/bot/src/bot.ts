@@ -1,4 +1,4 @@
-import { Bot, GrammyError, HttpError, InlineKeyboard } from 'grammy';
+import { Bot, GrammyError, InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
 import type { BotConfig } from './config';
@@ -6,8 +6,6 @@ import { RU_LANGUAGE_CODES, escapeHtml, resolveLang, t } from './i18n';
 import type { Lang, MessageKey } from './i18n';
 import { describeError } from './logger';
 import type { Logger } from './logger';
-import { createPaymentForwarder } from './payments';
-import type { PaymentForwarder, PaymentRetryOptions } from './payments';
 import type { NotifySettingKey, NotifySettings, ServerClient, TgUserInfo } from './server-client';
 
 export interface BotDeps {
@@ -15,26 +13,22 @@ export interface BotDeps {
   logger: Logger;
   /** Skips the initial `getMe` when provided. */
   botInfo?: UserFromGetMe;
-  /** Hard limit for the server's pre-checkout answer. Default 3000 ms. */
-  preCheckoutTimeoutMs?: number;
-  paymentRetry?: PaymentRetryOptions;
 }
 
 export interface ShellterBot {
   bot: Bot;
-  payments: PaymentForwarder;
   /** Registers the command list (ru + en) and the default menu button. Call once on startup. */
   setupProfile(): Promise<void>;
 }
 
 /** Update types the bot handles; pass to `bot.start` / `setWebhook`. */
-export const ALLOWED_UPDATES = ['message', 'callback_query', 'pre_checkout_query'] as const;
+export const ALLOWED_UPDATES = ['message', 'callback_query'] as const;
 
 /** Deep-link payloads Telegram can deliver: up to 64 characters of A-Z, a-z, 0-9, _ and -. */
 const START_PARAM = /^[A-Za-z0-9_-]{1,64}$/;
 const SETTINGS_CALLBACK = /^ns:(enabled|corf|events|kraken):([01])$/;
 const SETTING_KEYS: readonly NotifySettingKey[] = ['enabled', 'corf', 'events', 'kraken'];
-const COMMANDS = ['start', 'play', 'settings', 'help', 'paysupport', 'terms'] as const;
+const COMMANDS = ['start', 'play', 'settings', 'help', 'terms'] as const;
 const LANG_CACHE_SIZE = 20_000;
 
 /** The Mini App URL, with the deep-link payload passed the way Telegram does it for direct links. */
@@ -74,47 +68,19 @@ function toTgUser(from: NonNullable<Context['from']>): TgUserInfo {
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
-  });
-}
-
 function isNotModified(error: unknown): boolean {
   return error instanceof GrammyError && error.description.includes('message is not modified');
 }
 
-/**
- * The server's `error` may be a machine code or a sentence meant for the player. Only text that looks
- * like a sentence is shown; codes are replaced with a generic localized message.
- */
-function playerFacingError(error: string | undefined): string | undefined {
-  if (error === undefined) return undefined;
-  const text = error.trim();
-  return /\s/.test(text) ? text.slice(0, 200) : undefined;
-}
-
 export function createBot(config: BotConfig, deps: BotDeps): ShellterBot {
   const { server, logger } = deps;
-  const preCheckoutTimeoutMs = deps.preCheckoutTimeoutMs ?? 3000;
   const bot = new Bot(config.botToken, {
     client: { apiRoot: config.telegramApiRoot },
     ...(deps.botInfo ? { botInfo: deps.botInfo } : {}),
   });
-  const payments = createPaymentForwarder(server, logger.child({ scope: 'payments' }), deps.paymentRetry);
 
   // The server knows the player's language; remember its last answer so that commands which do not
-  // call the server (/help, /terms, payment messages) use the same language.
+  // call the server (/help, /terms) use the same language.
   const langCache = new Map<number, Lang>();
   const rememberLang = (tgId: number, lang: Lang): Lang => {
     langCache.delete(tgId);
@@ -170,14 +136,6 @@ export function createBot(config: BotConfig, deps: BotDeps): ShellterBot {
     await ctx.reply(t(lang, 'help.text'), { parse_mode: 'HTML', reply_markup: playKeyboard(config, lang) });
   });
 
-  privateChat.command('paysupport', async (ctx) => {
-    const lang = langOf(ctx.from);
-    await ctx.reply(
-      t(lang, 'paysupport.text', { contact: escapeHtml(config.supportContact), id: ctx.from.id }),
-      { parse_mode: 'HTML', link_preview_options: { is_disabled: true } },
-    );
-  });
-
   privateChat.command('terms', async (ctx) => {
     const lang = langOf(ctx.from);
     await ctx.reply(t(lang, 'terms.text', { contact: escapeHtml(config.supportContact) }), {
@@ -231,77 +189,11 @@ export function createBot(config: BotConfig, deps: BotDeps): ShellterBot {
     await ctx.answerCallbackQuery();
   });
 
-  // ---------------------------------------------------------------------------------------------------
-  // Payments (Telegram Stars)
-  // ---------------------------------------------------------------------------------------------------
-
-  bot.on('pre_checkout_query', async (ctx) => {
-    const query = ctx.preCheckoutQuery;
-    const lang = langOf(query.from);
-    let ok = false;
-    let errorMessage = t(lang, 'pay.unavailable');
-    try {
-      const result = await withTimeout(
-        server.preCheckout({
-          tgId: query.from.id,
-          payload: query.invoice_payload,
-          currency: query.currency,
-          totalAmount: query.total_amount,
-        }),
-        preCheckoutTimeoutMs,
-      );
-      ok = result.ok;
-      if (!ok) {
-        errorMessage = playerFacingError(result.error) ?? t(lang, 'pay.rejected');
-        logger.info('pre-checkout rejected by server', { tgId: query.from.id, reason: result.error });
-      }
-    } catch (error) {
-      logger.warn('pre-checkout: server did not answer', { tgId: query.from.id, ...describeError(error) });
-    }
-    // Telegram waits 10 s at most; the query must be answered whatever happened above.
-    const answer = (): Promise<true> =>
-      ctx.answerPreCheckoutQuery(ok, ok ? undefined : { error_message: errorMessage });
-    try {
-      await answer();
-    } catch (error) {
-      if (!(error instanceof HttpError)) throw error;
-      await answer();
-    }
-  });
-
-  bot.on('message:successful_payment', async (ctx) => {
-    const payment = ctx.message.successful_payment;
-    const from = ctx.from;
-    const chatId = ctx.chat.id;
-    const lang = langOf(from);
-    await payments.forward(
-      {
-        tgId: from.id,
-        payload: payment.invoice_payload,
-        currency: payment.currency,
-        totalAmount: payment.total_amount,
-        telegramPaymentChargeId: payment.telegram_payment_charge_id,
-        ...(payment.provider_payment_charge_id ? { providerPaymentChargeId: payment.provider_payment_charge_id } : {}),
-      },
-      async (outcome) => {
-        if (outcome.kind === 'delayed') {
-          await bot.api.sendMessage(chatId, t(lang, 'pay.delayed'));
-        } else if (outcome.kind === 'failed') {
-          await bot.api.sendMessage(chatId, t(lang, 'pay.failed'));
-        } else if (!outcome.response.duplicate) {
-          const title = outcome.response.productTitle;
-          await bot.api.sendMessage(chatId, title ? t(lang, 'pay.thanks', { title }) : t(lang, 'pay.thanksGeneric'));
-        }
-      },
-    );
-  });
-
   const commandsFor = (lang: Lang): { command: string; description: string }[] =>
     COMMANDS.map((command) => ({ command, description: t(lang, `cmd.${command}`) }));
 
   return {
     bot,
-    payments,
     async setupProfile() {
       // English is the default list; Russian is registered for every language served in Russian.
       await bot.api.setMyCommands(commandsFor('en'));

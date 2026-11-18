@@ -6,6 +6,8 @@ import { api, ApiError, setToken } from './api';
 import { lang, t } from './i18n';
 import { loadDurable, loadLocal, removeLocal, saveLocal } from './platform/storage';
 import { initPlatform, platformKind, tg } from './platform/telegram';
+import { IS_YANDEX, initYandex } from './platform/yandex';
+import { openLocalSave } from './local/backend';
 
 export type Screen = 'boot' | 'home' | 'hunt' | 'camp' | 'battle' | 'down' | 'result';
 export type Panel = null | 'quests' | 'events' | 'shop' | 'settings' | 'inbox' | 'almanac' | 'heroes' | 'talents' | { building: BuildingId };
@@ -119,6 +121,12 @@ export function applyAuth(res: { token: string; secret?: string; player: PlayerV
 }
 
 export async function authenticate(): Promise<void> {
+  if (IS_YANDEX) {
+    await initYandex();
+    const res = await openLocalSave();
+    applyAuth({ token: '', player: res.player, run: res.run });
+    return;
+  }
   const kind = await initPlatform(async (user, startParam) => (await api.devInitData(user, startParam)).initData);
   const app = tg();
   if (kind !== 'web' && app?.initData) {

@@ -3,13 +3,11 @@ import { loadConfig } from './config';
 import { connect } from './db';
 import { startJobs } from './jobs';
 import { seedDev } from './seed';
-import { httpBotClient } from './shop';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const handle = await connect(config.databaseUrl);
-  const bot = config.botInternalUrl ? httpBotClient(config.botInternalUrl, config.internalSecret) : null;
-  const app = buildApp({ db: handle.db, config, bot });
+  const app = buildApp({ db: handle.db, config });
   // Bot ghosts and a default schedule make a fresh database playable right away.
   await seedDev(app.ctx);
   const stopJobs = startJobs(app.ctx, (err) => app.log.error({ err }, 'job failed'));

@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      # Internal API for the game server (invoices, refunds). Keep it private: bind to localhost
+      # Health check and the webhook. Keep it private: bind to localhost
       # or a VPN address, never to a public interface.
       - '${BOT_INTERNAL_BIND:-127.0.0.1}:8082:8082'
 

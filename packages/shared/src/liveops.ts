@@ -87,23 +87,26 @@ export function weekKey(ms: number): string {
   return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-function rollQuests(period: 'daily' | 'weekly', count: number, seed: string): QuestProgress[] {
-  const pool = QUESTS.filter((x) => x.period === period);
+function rollQuests(period: 'daily' | 'weekly', count: number, seed: string, exclude: readonly QuestMetric[]): QuestProgress[] {
+  const pool = QUESTS.filter((x) => x.period === period && !exclude.includes(x.metric));
   return createRng(seed)
     .shuffle(pool)
     .slice(0, count)
     .map((x) => ({ id: x.id, progress: 0, claimed: false }));
 }
 
-/** Rolls new daily/weekly quests when the period changed. Deterministic per player and period. */
-export function refreshQuests(state: QuestState | null, playerId: string, now: number): QuestState {
+/**
+ * Rolls new daily/weekly quests when the period changed. Deterministic per player and period.
+ * `exclude` drops metrics a build cannot progress (the Kraken in the offline build).
+ */
+export function refreshQuests(state: QuestState | null, playerId: string, now: number, exclude: readonly QuestMetric[] = []): QuestState {
   const day = dayKey(now);
   const week = weekKey(now);
   return {
     day,
-    daily: state && state.day === day ? state.daily : rollQuests('daily', DAILY_QUESTS, `q/${playerId}/${day}`),
+    daily: state && state.day === day ? state.daily : rollQuests('daily', DAILY_QUESTS, `q/${playerId}/${day}`, exclude),
     week,
-    weekly: state && state.week === week ? state.weekly : rollQuests('weekly', WEEKLY_QUESTS, `q/${playerId}/${week}`),
+    weekly: state && state.week === week ? state.weekly : rollQuests('weekly', WEEKLY_QUESTS, `q/${playerId}/${week}`, exclude),
   };
 }
 
@@ -210,6 +213,22 @@ export const DEFAULT_EVENTS: readonly Omit<LiveEventConfig, 'startsAt' | 'endsAt
   },
 ];
 
+/**
+ * Builds without a server have no leaderboard: the rank tiers of an event turn into personal score
+ * goals, best tier first. A week of steady play reaches the second goal.
+ */
+export const EVENT_SCORE_GOALS = [6000, 3000, 1200, 1] as const;
+
+export function eventGoals(ev: LiveEventConfig, score: number): { score: number; reward: Cost; cosmetic?: string; reached: boolean }[] {
+  return ev.rankRewards.map((r, i) => {
+    const need = EVENT_SCORE_GOALS[Math.min(i, EVENT_SCORE_GOALS.length - 1)] as number;
+    return r.cosmetic ? { score: need, reward: r.reward, cosmetic: r.cosmetic, reached: score >= need } : { score: need, reward: r.reward, reached: score >= need };
+  });
+}
+
+/** Kraken health in builds without a server: the share of one active player on the server. */
+export const KRAKEN_SOLO_HP = 6000;
+
 // --- Kraken (community boss) ---------------------------------------------------------------------------
 
 export interface KrakenConfig {
@@ -290,31 +309,31 @@ export function seasonResetTrophies(trophies: number): number {
   return Math.floor(trophies * 0.5);
 }
 
-// --- Shop (Telegram Stars) and cosmetics -------------------------------------------------------------------
+// --- Cosmetics -------------------------------------------------------------------
 
 export type CosmeticKind = 'crab' | 'shell' | 'merge' | 'town' | 'title';
 
 export interface CosmeticDef {
   id: string;
   kind: CosmeticKind;
-  source: 'shop' | 'pass' | 'league' | 'event' | 'free';
+  source: 'ads' | 'pass' | 'league' | 'event' | 'free';
 }
 
 export const COSMETICS: readonly CosmeticDef[] = [
   { id: 'crab_default', kind: 'crab', source: 'free' },
-  { id: 'crab_azure', kind: 'crab', source: 'shop' },
-  { id: 'crab_coral', kind: 'crab', source: 'shop' },
+  { id: 'crab_azure', kind: 'crab', source: 'ads' },
+  { id: 'crab_coral', kind: 'crab', source: 'ads' },
   { id: 'crab_gold', kind: 'crab', source: 'pass' },
   { id: 'crab_abyss', kind: 'crab', source: 'league' },
   { id: 'shell_default', kind: 'shell', source: 'free' },
-  { id: 'shell_candy', kind: 'shell', source: 'shop' },
-  { id: 'shell_galaxy', kind: 'shell', source: 'shop' },
+  { id: 'shell_candy', kind: 'shell', source: 'ads' },
+  { id: 'shell_galaxy', kind: 'shell', source: 'ads' },
   { id: 'shell_pearl', kind: 'shell', source: 'pass' },
   { id: 'merge_default', kind: 'merge', source: 'free' },
-  { id: 'merge_rainbow', kind: 'merge', source: 'shop' },
+  { id: 'merge_rainbow', kind: 'merge', source: 'ads' },
   { id: 'merge_bubbles', kind: 'merge', source: 'pass' },
   { id: 'town_default', kind: 'town', source: 'free' },
-  { id: 'town_lanterns', kind: 'town', source: 'shop' },
+  { id: 'town_lanterns', kind: 'town', source: 'ads' },
   { id: 'title_jelly_king', kind: 'title', source: 'event' },
   { id: 'title_pearl_baron', kind: 'title', source: 'event' },
   { id: 'title_lamplighter', kind: 'title', source: 'event' },
@@ -323,60 +342,46 @@ export const COSMETICS: readonly CosmeticDef[] = [
 ];
 export const COSMETIC_BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETICS.map((x) => [x.id, x]));
 
-export type ProductGrant =
-  | { type: 'cosmetic'; id: string }
-  | { type: 'pass' }
-  | { type: 'no_ads' }
-  | { type: 'resources'; coral: number; shine: number }
-  | { type: 'second_chance'; count: number }
-  | { type: 'save_slot' };
+/**
+ * Things unlocked by watching rewarded ads, one view at a time. Progress is kept, so a player can
+ * spread the views over several sessions. Nothing here changes battle strength.
+ */
+export type AdUnlockGrant = { type: 'cosmetic'; id: string };
 
-export interface ProductDef {
+export interface AdUnlockDef {
   id: string;
-  /** Price in Telegram Stars. */
-  stars: number;
-  grant: ProductGrant;
-  /** Can be bought only once (cosmetics, pass per season, no_ads). */
-  once?: boolean;
-  /** Purchases per UTC day. */
-  dailyLimit?: number;
+  /** Rewarded ads needed to unlock. */
+  views: number;
+  grant: AdUnlockGrant;
 }
 
-/** Everything sold for Stars has known contents and no effect on PvP strength. */
-export const PRODUCTS: readonly ProductDef[] = [
-  { id: 'crab_azure', stars: 75, grant: { type: 'cosmetic', id: 'crab_azure' }, once: true },
-  { id: 'crab_coral', stars: 75, grant: { type: 'cosmetic', id: 'crab_coral' }, once: true },
-  { id: 'shell_candy', stars: 100, grant: { type: 'cosmetic', id: 'shell_candy' }, once: true },
-  { id: 'shell_galaxy', stars: 100, grant: { type: 'cosmetic', id: 'shell_galaxy' }, once: true },
-  { id: 'merge_rainbow', stars: 60, grant: { type: 'cosmetic', id: 'merge_rainbow' }, once: true },
-  { id: 'town_lanterns', stars: 80, grant: { type: 'cosmetic', id: 'town_lanterns' }, once: true },
-  { id: 'season_pass', stars: 250, grant: { type: 'pass' }, once: true },
-  { id: 'no_ads', stars: 150, grant: { type: 'no_ads' }, once: true },
-  { id: 'save_slot', stars: 100, grant: { type: 'save_slot' }, once: true },
-  { id: 'second_chance', stars: 25, grant: { type: 'second_chance', count: 1 }, dailyLimit: 5 },
-  { id: 'pack_coral_s', stars: 50, grant: { type: 'resources', coral: 500, shine: 5 }, dailyLimit: 1 },
-  { id: 'pack_coral_m', stars: 120, grant: { type: 'resources', coral: 1500, shine: 20 }, dailyLimit: 1 },
+export const AD_UNLOCKS: readonly AdUnlockDef[] = [
+  { id: 'merge_rainbow', views: 4, grant: { type: 'cosmetic', id: 'merge_rainbow' } },
+  { id: 'crab_azure', views: 5, grant: { type: 'cosmetic', id: 'crab_azure' } },
+  { id: 'crab_coral', views: 5, grant: { type: 'cosmetic', id: 'crab_coral' } },
+  { id: 'town_lanterns', views: 5, grant: { type: 'cosmetic', id: 'town_lanterns' } },
+  { id: 'shell_candy', views: 7, grant: { type: 'cosmetic', id: 'shell_candy' } },
+  { id: 'shell_galaxy', views: 7, grant: { type: 'cosmetic', id: 'shell_galaxy' } },
 ];
-export const PRODUCT_BY_ID: ReadonlyMap<string, ProductDef> = new Map(PRODUCTS.map((x) => [x.id, x]));
+export const AD_UNLOCK_BY_ID: ReadonlyMap<string, AdUnlockDef> = new Map(AD_UNLOCKS.map((x) => [x.id, x]));
 
-/** Season pass: XP comes from quests; the free track gives resources, the paid one cosmetics. */
+/** Season pass: one free track. XP comes from quests; levels give resources, three of them a look. */
 export const PASS_XP_PER_LEVEL = 100;
 export const PASS_LEVELS = 20;
 export interface PassReward {
   level: number;
-  free: Cost;
-  premium: { cosmetic?: string; coral?: number; shine?: number };
+  reward: { coral: number; shine: number; cosmetic?: string };
 }
+const PASS_COSMETICS: Readonly<Record<number, string>> = { 5: 'merge_bubbles', 12: 'shell_pearl', 20: 'crab_gold' };
 export const PASS_REWARDS: readonly PassReward[] = Array.from({ length: PASS_LEVELS }, (_, i) => {
   const level = i + 1;
-  const premium: PassReward['premium'] =
-    level === 5 ? { cosmetic: 'merge_bubbles' } : level === 12 ? { cosmetic: 'shell_pearl' } : level === 20 ? { cosmetic: 'crab_gold' } : { coral: 60 + 15 * level, shine: level % 2 === 0 ? 3 : 0 };
-  return { level, free: { coral: 30 + 10 * level, shine: level % 5 === 0 ? 5 : 0 }, premium };
+  const cosmetic = PASS_COSMETICS[level];
+  return { level, reward: { coral: 30 + 10 * level, shine: level % 5 === 0 ? 5 : 0, ...(cosmetic ? { cosmetic } : {}) } };
 });
 
 // --- Rewarded ads --------------------------------------------------------------------------------------------
 
-export const AD_PLACEMENTS = ['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost'] as const;
+export const AD_PLACEMENTS = ['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost', 'unlock'] as const;
 export type AdPlacement = (typeof AD_PLACEMENTS)[number];
 export const AD_DAILY_CAPS: Record<AdPlacement, number> = {
   double_loot: 5,
@@ -384,6 +389,7 @@ export const AD_DAILY_CAPS: Record<AdPlacement, number> = {
   daily_chest: 1,
   reroll: 6,
   corf_boost: 3,
+  unlock: 30,
 };
 export const AD_DAILY_TOTAL = 12;
 export const DAILY_CHEST_REWARD: Cost = { coral: 80, shine: 3 };

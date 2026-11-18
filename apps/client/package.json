@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "e2e": "playwright test --trace off"
+    "e2e": "playwright test --trace off",
+    "build:yandex": "VITE_TARGET=yandex vite build && node ../../tools/yandex/pack.mjs dist-yandex",
+    "preview:yandex": "VITE_TARGET=yandex vite --port 5175"
   },
   "dependencies": {
     "@preact/signals": "^2.0.0",

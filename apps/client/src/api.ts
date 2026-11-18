@@ -1,13 +1,12 @@
 import type {
   AdIntentView, AdPlacement, AuthResponse, BuildingId, ClientRunAction, Cost, InboxItem, KrakenAttackResponse, LiveopsView, MeResponse,
-  OrderView, PlayerView, PublicRun, RunActionResponse, ShopView,
+  PlayerView, PublicRun, RunActionResponse,
 } from '@shellter/shared';
 
-export class ApiError extends Error {
-  constructor(public code: string, public status: number, message?: string) {
-    super(message ?? code);
-  }
-}
+import { ApiError } from './apiError';
+import { localApi } from './local/backend';
+
+export { ApiError };
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 let token: string | null = null;
@@ -42,7 +41,7 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
 
 type P = { player: PlayerView };
 
-export const api = {
+const httpApi = {
   authTelegram: (initData: string) => call<AuthResponse>('POST', '/api/auth/telegram', { initData }),
   authGuest: (secret?: string) => call<AuthResponse>('POST', '/api/auth/guest', secret ? { secret } : {}),
   authLink: (initData: string) => call<AuthResponse>('POST', '/api/auth/link', { initData }),
@@ -62,21 +61,24 @@ export const api = {
   corf: (adIntentId?: string) => call<P & { gained: number }>('POST', '/api/corf/collect', adIntentId ? { adIntentId } : {}),
   almanacClaim: (id: string) => call<P & { reward: Cost }>('POST', '/api/almanac/claim', { id }),
   questClaim: (id: string) => call<P & { reward: Cost }>('POST', '/api/quests/claim', { id }),
-  passClaim: (level: number, track: 'free' | 'premium') => call<P>('POST', '/api/pass/claim', { level, track }),
+  passClaim: (level: number) => call<P>('POST', '/api/pass/claim', { level }),
   equip: (id: string) => call<P>('POST', '/api/cosmetics/equip', { id }),
   liveops: () => call<LiveopsView>('GET', '/api/liveops'),
   krakenAttack: () => call<KrakenAttackResponse>('POST', '/api/kraken/attack', {}),
   krakenClaim: (pct: number) => call<P & { reward: Cost }>('POST', '/api/kraken/claim', { pct }),
   inbox: () => call<{ items: InboxItem[] }>('GET', '/api/inbox'),
   inboxClaim: (id: string) => call<P>('POST', '/api/inbox/claim', { id }),
-  shop: () => call<ShopView>('GET', '/api/shop'),
-  invoice: (productId: string) => call<{ orderId: string; url: string }>('POST', '/api/shop/invoice', { productId }),
-  order: (id: string) => call<OrderView>('GET', `/api/shop/order/${id}`),
   adIntent: (placement: AdPlacement) => call<AdIntentView>('POST', '/api/ads/intent', { placement }),
   adStatus: (id: string) => call<AdIntentView>('GET', `/api/ads/intent/${id}`),
   adChest: (id: string) => call<P & { reward: Cost }>('POST', '/api/ads/chest', { id }),
+  adUnlock: (id: string, adIntentId: string) => call<P & { unlocked: boolean }>('POST', '/api/ads/unlock', { id, adIntentId }),
   analytics: (sessionId: string, events: { type: string; props?: Record<string, unknown>; t: number }[]) => call<{ ok: true }>('POST', '/api/analytics', { sessionId, events }),
   devInitData: (user: { id: number; first_name: string; language_code: string }, startParam?: string) =>
     call<{ initData: string }>('POST', '/api/dev/init-data', startParam ? { user, startParam } : { user }),
   devAdWatch: () => call<{ ok: boolean }>('POST', '/api/dev/ad-watch', {}),
 };
+
+export type Api = typeof httpApi;
+
+/** The Yandex Games build runs without a server: the same calls are answered in the browser. */
+export const api: Api = import.meta.env.VITE_TARGET === 'yandex' ? localApi : httpApi;

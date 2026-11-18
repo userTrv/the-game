@@ -9,7 +9,9 @@ import { initStage, setPaused, takeFps } from './gfx/stage';
 import { t } from './i18n';
 import { loadLocal, saveLocal } from './platform/storage';
 import { platformKind } from './platform/telegram';
-import { unlockAudioOnGesture } from './sound';
+import { IS_YANDEX, loadingReady, onPlatformPause, setGameplay } from './platform/yandex';
+import { flushSave } from './local/save';
+import { audio, unlockAudioOnGesture } from './sound';
 import { authenticate, bootError, landing, flushAnalytics, loadProgress, panel, player, refreshMe, run, screen, screenForRun, sessionSeconds, settings, startRun, track } from './state';
 import './styles.css';
 import { App } from './ui/App';
@@ -41,7 +43,7 @@ async function boot(): Promise<void> {
     void loadAtlas('lagoon');
     void loadAtlas('town');
     const p = player.value;
-    if (platformKind() === 'web' && !loadLocal('played', false) && !new URLSearchParams(location.search).has('play')) {
+    if (!IS_YANDEX && platformKind() === 'web' && !loadLocal('played', false) && !new URLSearchParams(location.search).has('play')) {
       await new Promise<void>((resolve) => (landing.value = resolve));
       landing.value = null;
     }
@@ -52,13 +54,36 @@ async function boot(): Promise<void> {
       track('tutorial_step', { step: 'start' });
       if (!(await startRun('hermit'))) screen.value = 'home';
     } else screen.value = 'home';
+    if (IS_YANDEX) startYandexHooks();
   } catch (e) {
     console.error(e);
     bootError.value = t('common.offline');
   }
 }
 
-initFullscreen();
+/**
+ * Yandex Games: the game is playable now (LoadingAPI.ready), gameplay start/stop follows the screen
+ * and open panels, and the platform's pause (ads, hidden tab) stops the picture and the sound.
+ */
+function startYandexHooks(): void {
+  loadingReady();
+  effect(() => {
+    const s = screen.value;
+    setGameplay(panel.value === null && (s === 'hunt' || s === 'camp' || s === 'battle' || s === 'down'));
+  });
+  onPlatformPause((paused) => {
+    if (paused) {
+      hunt()?.setPaused(true);
+      setPaused(true);
+      audio.suspend();
+    } else if (!document.hidden) {
+      setPaused(false);
+      audio.resume();
+    }
+  });
+}
+
+if (!IS_YANDEX) initFullscreen();
 
 // Esc closes the open panel, or opens the settings (which pauses the pool).
 window.addEventListener('keydown', (e) => {
@@ -73,6 +98,7 @@ window.addEventListener('keydown', (e) => {
 document.addEventListener('visibilitychange', () => {
   setPaused(document.hidden);
   if (document.hidden) {
+    if (IS_YANDEX) flushSave();
     track('session_end', { seconds: sessionSeconds() });
     flushAnalytics();
   }

@@ -4,7 +4,7 @@ import { useEffect } from 'preact/hooks';
 import './styles.css';
 
 /**
- * Operator console: metrics, players, live events, broadcasts and refunds. Talks only to
+ * Operator console: metrics, players, live events and broadcasts. Talks only to
  * /admin/api of the game server; the session token lives in sessionStorage (gone with the tab).
  */
 const token = signal<string | null>(sessionStorage.getItem('admin_token'));
@@ -167,32 +167,28 @@ function PlayerCard({ id, onClose }: { id: string; onClose: () => void }): JSX.E
       <h2>Последние забеги</h2>
       <div class="wrap"><table><thead><tr><th>Начат</th><th>Герой</th><th>Статус</th><th>Итог</th><th class="num">Этап</th></tr></thead>
         <tbody>{d.runs.map((r) => <tr key={r.id}><td>{date(r.startedAt)}</td><td>{r.heroId}</td><td>{r.status}</td><td>{r.result ?? '—'}</td><td class="num">{r.stage}</td></tr>)}</tbody></table></div>
-      {d.payments.length > 0 ? <><h2 style={{ marginTop: '12px' }}>Платежи</h2><PaymentsTable rows={d.payments} onChange={reload} /></> : null}
+      {d.payments.length > 0 ? <><h2 style={{ marginTop: '12px' }}>Платежи</h2><PaymentsTable rows={d.payments} /></> : null}
     </div>
   );
 }
 
 interface PaymentRow { id: string; playerId: string; productId: string; stars: number; status: string; createdAt: number; paidAt: number | null; refundedAt: number | null }
 
-function PaymentsTable({ rows, onChange }: { rows: PaymentRow[]; onChange: () => void }): JSX.Element {
-  const refund = async (p: PaymentRow): Promise<void> => {
-    if (!window.confirm(`Вернуть ${p.stars} Stars за «${p.productId}»? Выданное будет отозвано.`)) return;
-    if (await run(() => call('POST', `/payments/${p.id}/refund`, {}))) onChange();
-  };
+/** Stars payments made before the shop was removed; kept read-only for history. */
+function PaymentsTable({ rows }: { rows: PaymentRow[] }): JSX.Element {
   return (
     <div class="wrap"><table>
-      <thead><tr><th>Оплачен</th><th>Товар</th><th class="num">Stars</th><th>Статус</th><th>Игрок</th><th /></tr></thead>
+      <thead><tr><th>Оплачен</th><th>Товар</th><th class="num">Stars</th><th>Статус</th><th>Игрок</th></tr></thead>
       <tbody>{rows.map((p) => (
-        <tr key={p.id}><td>{date(p.paidAt ?? p.createdAt)}</td><td>{p.productId}</td><td class="num">{p.stars}</td><td class={p.status === 'refunded' ? 'err' : p.status === 'paid' ? 'ok' : 'mute'}>{p.status}</td><td class="mute">{p.playerId}</td>
-          <td>{p.status === 'paid' ? <button class="danger" onClick={() => void refund(p)}>Возврат</button> : null}</td></tr>
+        <tr key={p.id}><td>{date(p.paidAt ?? p.createdAt)}</td><td>{p.productId}</td><td class="num">{p.stars}</td><td class={p.status === 'refunded' ? 'err' : p.status === 'paid' ? 'ok' : 'mute'}>{p.status}</td><td class="mute">{p.playerId}</td></tr>
       ))}</tbody>
     </table></div>
   );
 }
 
 function PaymentsTab(): JSX.Element {
-  const { data, reload } = useLoad<{ payments: PaymentRow[] }>('/payments');
-  return <div class="card"><h2>Платежи Stars</h2><PaymentsTable rows={data?.payments ?? []} onChange={reload} /></div>;
+  const { data } = useLoad<{ payments: PaymentRow[] }>('/payments');
+  return <div class="card"><h2>Платежи Stars (архив)</h2><PaymentsTable rows={data?.payments ?? []} /></div>;
 }
 
 interface LiveRow { id: string; kind: 'event' | 'kraken' | 'season'; config: Record<string, unknown>; startsAt: number; endsAt: number; finalized: boolean }

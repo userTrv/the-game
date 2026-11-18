@@ -9,13 +9,14 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 export interface CosmeticsState {
   owned: string[];
   equipped: Record<CosmeticKind, string>;
+  /** Ad unlock id -> rewarded ads watched towards it. */
+  adViews?: Record<string, number>;
 }
 export interface PassState {
   season: string;
   xp: number;
-  premium: boolean;
-  claimedFree: number[];
-  claimedPremium: number[];
+  /** Claimed levels. Rows from before the single track have claimedFree instead. */
+  claimed: number[];
 }
 export interface PerksState {
   noAds: boolean;

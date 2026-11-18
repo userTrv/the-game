@@ -19,3 +19,5 @@ apps/client/src/assets/generated/
 *.tsbuildinfo
 tmp/
 secrets/
+apps/client/dist-yandex/
+apps/client/shellter-yandex.zip

@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals';
 import {
-  COSMETICS, DAILY_CHEST_REWARD, DIETS, KRAKEN_ATTACKS_PER_DAY, LEAGUES, PASS_LEVELS, PASS_REWARDS, PASS_XP_PER_LEVEL, PRODUCT_BY_ID, QUEST_BY_ID, BAL,
-  type InboxItem, type QuestProgress, type ShopView,
+  AD_DAILY_CAPS, AD_UNLOCKS, COSMETICS, DAILY_CHEST_REWARD, DIETS, KRAKEN_ATTACKS_PER_DAY, LEAGUES, PASS_LEVELS, PASS_REWARDS, PASS_XP_PER_LEVEL, QUEST_BY_ID, BAL,
+  type AdUnlockDef, type InboxItem, type PlayerView, type QuestProgress,
 } from '@shellter/shared';
 import type { JSX } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
@@ -10,6 +10,7 @@ import { duration, lang, local, num, t } from '../i18n';
 import { adsAvailable, watchAd } from '../platform/ads';
 import { canFullscreen, fullscreen, setFullscreen } from '../platform/fullscreen';
 import { platformKind, tg } from '../platform/telegram';
+import { IS_YANDEX, signIn } from '../platform/yandex';
 import { sfx } from '../sound';
 import { applyAuth, battle, busy, ended, errorText, isTelegram, liveops, meta, panel, player, refreshMe, run, screen, setLang, setSettings, settings, showToast, track } from '../state';
 import { Btn, CostView, flyIcons, Res, Sheet, Spr } from './kit';
@@ -68,21 +69,17 @@ export function QuestsSheet(): JSX.Element | null {
         ) : (
           <>
             <div class="row between small"><span>{t('quests.pass.level', { n: level })}</span><span class="muted">{p.pass.xp % PASS_XP_PER_LEVEL}/{PASS_XP_PER_LEVEL}</span></div>
-            {!p.pass.premium ? <Btn class="gold sm" id="pass-buy" onClick={() => (panel.value = 'shop')}>{t('quests.pass.buy')}</Btn> : null}
             {PASS_REWARDS.map((r) => {
               const open = level >= r.level;
-              const fc = p.pass.claimedFree.includes(r.level);
-              const pc = p.pass.claimedPremium.includes(r.level);
+              const done = p.pass.claimed.includes(r.level);
               return (
                 <div class="item" key={r.level} style={{ opacity: open ? 1 : 0.55 }}>
                   <b style={{ width: '22px' }}>{r.level}</b>
-                  <div class="grow col" style={{ gap: '3px' }}>
-                    <div class="row between tiny"><CostView cost={r.free} />{fc ? '✓' : <Btn class="sm ok" id={`pass-free-${r.level}`} disabled={!open} onClick={() => void meta(() => api.passClaim(r.level, 'free')).then((x) => x && sfx('reward'))}>{t('common.claim')}</Btn>}</div>
-                    <div class="row between tiny" style={{ color: 'var(--gold)' }}>
-                      <span class="row">★ {r.premium.cosmetic ? t(`cosmetic.${r.premium.cosmetic}`) : <CostView cost={{ coral: r.premium.coral ?? 0, shine: r.premium.shine ?? 0 }} />}</span>
-                      {pc ? '✓' : <Btn class="sm gold" disabled={!open || !p.pass.premium} onClick={() => void meta(() => api.passClaim(r.level, 'premium')).then((x) => x && sfx('reward'))}>{p.pass.premium ? t('common.claim') : '🔒'}</Btn>}
-                    </div>
+                  <div class="grow col tiny" style={{ gap: '3px' }}>
+                    <CostView cost={r.reward} />
+                    {r.reward.cosmetic ? <span style={{ color: 'var(--gold)' }}>{t(`cosmetic.${r.reward.cosmetic}`)}</span> : null}
                   </div>
+                  {done ? '✓' : <Btn class="sm ok" id={`pass-claim-${r.level}`} disabled={!open} onClick={() => void meta(() => api.passClaim(r.level)).then((x) => x && sfx('reward'))}>{t('common.claim')}</Btn>}
                 </div>
               );
             })}
@@ -128,7 +125,7 @@ export function EventsSheet(): JSX.Element | null {
     <Sheet title={t('events.title')} onClose={close} id="events-sheet">
       <div class="tabs">
         <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>{t('nav.events')}</button>
-        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button>
+        {l?.kraken ? <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button> : null}
         <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>{t('league.title')}</button>
       </div>
       <div class="scroll list" style={{ minHeight: '330px' }}>
@@ -140,13 +137,25 @@ export function EventsSheet(): JSX.Element | null {
                 <div class="muted small">{local(l.event.config.description)}</div>
                 <div class="row between small"><span>{t('events.score', { n: num(l.event.myScore) })}{l.event.myRank ? ` · ${t('events.rank', { n: l.event.myRank })}` : ''}</span><span class="chip tiny">{t('events.ends', { t: duration(l.event.config.endsAt - now) })}</span></div>
               </div>
-              <div class="h2">{t('events.rewards')}</div>
-              {l.event.config.rankRewards.map((r, i) => {
-                const from = (l.event?.config.rankRewards[i - 1]?.upTo ?? 0) + 1;
-                return <div class="item small" key={i}><span class="grow">{from === r.upTo ? t('events.place1', { a: from }) : t('events.place', { a: from, b: r.upTo >= 100000 ? '∞' : r.upTo })}</span><CostView cost={r.reward} />{r.cosmetic ? <span class="chip tiny">{t(`cosmetic.${r.cosmetic}`)}</span> : null}</div>;
-              })}
-              <div class="h2">{t('events.top')}</div>
-              {l.event.top.length === 0 ? <div class="muted small">{t('league.empty')}</div> : l.event.top.map((x, i) => <div class="item small" key={i}><b style={{ width: '24px' }}>{i + 1}</b><span class="grow">{x.name}</span>{num(x.score)}</div>)}
+              {l.event.goals ? (
+                <>
+                  <div class="h2">{t('events.goals')}</div>
+                  {l.event.goals.map((g, i) => (
+                    <div class={`item small ${g.reached ? 'done' : ''}`} key={i}><span class="grow">{g.reached ? '✓ ' : ''}{g.score <= 1 ? t('events.goal.any') : t('events.goal', { n: num(g.score) })}</span><CostView cost={g.reward} />{g.cosmetic ? <span class="chip tiny">{t(`cosmetic.${g.cosmetic}`)}</span> : null}</div>
+                  ))}
+                  <div class="muted tiny">{t('events.goals.note')}</div>
+                </>
+              ) : (
+                <>
+                  <div class="h2">{t('events.rewards')}</div>
+                  {l.event.config.rankRewards.map((r, i) => {
+                    const from = (l.event?.config.rankRewards[i - 1]?.upTo ?? 0) + 1;
+                    return <div class="item small" key={i}><span class="grow">{from === r.upTo ? t('events.place1', { a: from }) : t('events.place', { a: from, b: r.upTo >= 100000 ? '∞' : r.upTo })}</span><CostView cost={r.reward} />{r.cosmetic ? <span class="chip tiny">{t(`cosmetic.${r.cosmetic}`)}</span> : null}</div>;
+                  })}
+                  <div class="h2">{t('events.top')}</div>
+                  {l.event.top.length === 0 ? <div class="muted small">{t('league.empty')}</div> : l.event.top.map((x, i) => <div class="item small" key={i}><b style={{ width: '24px' }}>{i + 1}</b><span class="grow">{x.name}</span>{num(x.score)}</div>)}
+                </>
+              )}
             </>
           ) : <div class="muted center" style={{ padding: '30px 0' }}>{t('events.none')}</div>
         ) : null}
@@ -176,11 +185,16 @@ export function EventsSheet(): JSX.Element | null {
           <>
             <div class="panel light col">
               <div class="row between"><span class="h2">{t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
-              <div class="muted small">{t('league.desc')}</div>
+              <div class="muted small">{t(IS_YANDEX ? 'league.desc.ya' : 'league.desc')}</div>
               <div class="row wrap" style={{ gap: '4px' }}>{LEAGUES.map((x) => <span class="chip tiny" key={x.id} style={{ opacity: x.id === l.league.league ? 1 : 0.5 }}>{t(`league.${x.id}`)} {x.min}+</span>)}</div>
               {l.league.season ? <div class="tiny muted">{t('league.season', { t: duration(l.league.season.endsAt - now) })}{l.league.myRank ? ` · ${t('events.rank', { n: l.league.myRank })}` : ''}</div> : null}
             </div>
-            {l.league.top.length === 0 ? <div class="muted small center">{t('league.empty')}</div> : l.league.top.map((x, i) => <div class="item small" key={i}><b style={{ width: '24px' }}>{i + 1}</b><span class="grow">{x.name}</span><Spr id="icon/trophy" size={16} />{num(x.trophies)}</div>)}
+            {IS_YANDEX && p.guest ? (
+              <div class="item small"><span class="grow muted">{t('league.signin')}</span><Btn class="sm" id="league-signin" onClick={() => void signIn().then((ok) => ok && location.reload())}>{t('settings.yandex.login')}</Btn></div>
+            ) : null}
+            {l.league.top.length === 0 ? <div class="muted small center">{t('league.empty')}</div> : l.league.top.map((x, i) => (
+              <div class={`item small ${x.me ? 'done' : ''}`} key={i}><b style={{ width: '32px' }}>{x.rank ?? i + 1}</b><span class="grow">{x.name}</span><Spr id="icon/trophy" size={16} />{num(x.trophies)}</div>
+            ))}
           </>
         ) : null}
       </div>
@@ -190,59 +204,23 @@ export function EventsSheet(): JSX.Element | null {
 
 // --- Shop ------------------------------------------------------------------------------------------
 
+function unlockOwned(p: PlayerView, u: AdUnlockDef): boolean {
+  return p.cosmetics.owned.includes(u.grant.id);
+}
+
+function UnlockArt({ u }: { u: AdUnlockDef }): JSX.Element {
+  const id = u.grant.id;
+  if (id.startsWith('crab_')) return <Spr id={`crab/${id}/body`} size={44} />;
+  if (id.startsWith('shell_')) return <Spr id={`shell/paint_${id}`} size={48} />;
+  return <span style={{ fontSize: '30px' }}>✨</span>;
+}
+
 export function ShopSheet(): JSX.Element | null {
   const p = player.value;
-  const view = useSignal<ShopView | null>(null);
-  const waiting = useSignal<string | null>(null);
-  const load = (): void => void api.shop().then((v) => (view.value = v)).catch(() => undefined);
   useEffect(() => {
-    load();
-    track('purchase_open');
+    track('shop_open');
   }, []);
   if (!p) return null;
-  const poll = async (orderId: string): Promise<void> => {
-    for (let i = 0; i < 40; i++) {
-      try {
-        if ((await api.order(orderId)).status === 'paid') {
-          await refreshMe();
-          load();
-          waiting.value = null;
-          sfx('reward');
-          return showToast(t('shop.paid'));
-        }
-      } catch {
-        /* keep waiting */
-      }
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-    waiting.value = null;
-  };
-  const buy = async (productId: string): Promise<void> => {
-    if (waiting.value) return;
-    waiting.value = productId;
-    try {
-      const inv = await api.invoice(productId);
-      const app = tg();
-      if (app) {
-        // Inside Telegram the invoice opens natively; the goods arrive through the bot's webhook.
-        app.openInvoice(inv.url, (status) => {
-          if (status === 'paid') void poll(inv.orderId);
-          else {
-            waiting.value = null;
-            showToast(t('shop.cancelled'));
-          }
-        });
-      } else {
-        // On the website the same invoice link opens in Telegram; we wait for the server to see the payment.
-        window.open(inv.url, '_blank', 'noopener');
-        showToast(t('shop.open.tg'));
-        void poll(inv.orderId);
-      }
-    } catch (e) {
-      waiting.value = null;
-      showToast(errorText(e));
-    }
-  };
   const chest = async (): Promise<void> => {
     const w = await watchAd('daily_chest', p.perks.noAds);
     if (!w.ok) return showToast(t(w.reason === 'limit' ? 'ad.limit' : 'ad.failed'));
@@ -252,7 +230,19 @@ export function ShopSheet(): JSX.Element | null {
       flyIcons('icon/coral', document.getElementById('chest-btn'), 'shop-coral', 6);
     }
   };
-  const chestLeft = (p.adsToday.daily_chest ?? 0) < 1 && (adsAvailable() || p.perks.noAds);
+  const unlock = async (u: AdUnlockDef): Promise<void> => {
+    if (busy.value) return;
+    const w = await watchAd('unlock', false);
+    if (!w.ok) return showToast(t(w.reason === 'limit' ? 'ad.limit' : 'ad.failed'));
+    const res = await meta(() => api.adUnlock(u.id, w.intentId));
+    if (res?.unlocked) {
+      sfx('reward');
+      showToast(t('unlock.done', { name: t(`product.${u.id}`) }));
+    }
+  };
+  const ads = adsAvailable();
+  const chestLeft = (p.adsToday.daily_chest ?? 0) < 1 && ads;
+  const unlockLeft = (p.adsToday.unlock ?? 0) < AD_DAILY_CAPS.unlock;
   const kinds = ['crab', 'shell', 'merge', 'town', 'title'] as const;
   return (
     <Sheet title={t('shop.title')} onClose={close} id="shop-sheet">
@@ -261,27 +251,28 @@ export function ShopSheet(): JSX.Element | null {
         {chestLeft ? (
           <div class="item">
             <Spr id="node/chest" size={40} />
-            <div class="grow"><b>{t('shop.chest')}</b><div class="row tiny muted">{t('shop.chest.desc')} · <CostView cost={DAILY_CHEST_REWARD} /></div></div>
-            <Btn class="sm gold" id="chest-btn" onClick={() => void chest()}><Spr id="icon/ad" size={18} />{t('common.free')}</Btn>
+            <div class="grow"><b>{t('shop.chest')}</b><div class="row tiny muted"><CostView cost={DAILY_CHEST_REWARD} /></div></div>
+            <Btn class="sm gold" id="chest-btn" onClick={() => void chest()}><Spr id="icon/ad" size={18} />{t('unlock.watch')}</Btn>
           </div>
         ) : null}
-        <div class="muted tiny">{t('shop.note')}</div>
-        {view.value && !view.value.enabled ? <div class="small" style={{ color: 'var(--red)' }}>{t('shop.disabled')}</div> : null}
-        <div class="grid2" id="products">
-          {(view.value?.products ?? []).map((pr) => {
-            const def = PRODUCT_BY_ID.get(pr.id);
-            const cosmetic = def?.grant.type === 'cosmetic' ? def.grant.id : null;
+        <div class="grid2" id="unlocks">
+          {AD_UNLOCKS.map((u) => {
+            const owned = unlockOwned(p, u);
+            const n = p.adUnlocks[u.id] ?? 0;
             return (
-              <button class="card" style={{ minHeight: '120px' }} key={pr.id} id={`buy-${pr.id}`} disabled={!pr.available || !view.value?.enabled || waiting.value !== null} onClick={() => void buy(pr.id)}>
-                {cosmetic?.startsWith('crab_') ? <Spr id={`crab/${cosmetic}/body`} size={44} /> : cosmetic?.startsWith('shell_') ? <Spr id={`shell/paint_${cosmetic}`} size={48} /> : <span style={{ fontSize: '30px' }}>{def?.grant.type === 'resources' ? '🪸' : def?.grant.type === 'pass' ? '🎫' : def?.grant.type === 'no_ads' ? '🚫' : def?.grant.type === 'second_chance' ? '💖' : def?.grant.type === 'save_slot' ? '💾' : '✨'}</span>}
-                <div class="nm">{t(`product.${pr.id}`)}</div>
-                {!cosmetic ? <div class="ds">{t(`product.${pr.id}.desc`)}</div> : null}
-                <span class="price">{pr.available ? <><Spr id="icon/stars" size={16} />{pr.stars}</> : pr.reason === 'owned' ? t('shop.owned') : t('shop.limit')}</span>
-                {waiting.value === pr.id ? <span class="tiny muted">{t('shop.pending')}</span> : null}
-              </button>
+              <div class="card" style={{ minHeight: '120px' }} key={u.id} id={`unlock-${u.id}`}>
+                <UnlockArt u={u} />
+                <div class="nm">{t(`product.${u.id}`)}</div>
+                {owned ? (
+                  <span class="price">{t('shop.owned')}</span>
+                ) : (
+                  <Btn class="sm gold" id={`unlock-btn-${u.id}`} disabled={!ads || !unlockLeft} onClick={() => void unlock(u)}><Spr id="icon/ad" size={18} />{t('unlock.watch')} {n}/{u.views}</Btn>
+                )}
+              </div>
             );
           })}
         </div>
+        {!unlockLeft ? <div class="muted tiny center">{t('ad.limit')}</div> : null}
         <div class="h2">{t('shop.cosmetics')}</div>
         {kinds.map((k) => {
           const owned = COSMETICS.filter((c) => c.kind === k && p.cosmetics.owned.includes(c.id));
@@ -364,8 +355,9 @@ export function SettingsSheet(): JSX.Element | null {
   const s = settings.value;
   const notify = useSignal<{ settings: Record<string, boolean>; telegram: boolean } | null>(null);
   const nameDraft = useSignal(p?.name ?? '');
+  const abandonArmed = useSignal(false);
   useEffect(() => {
-    api.notifyGet().then((n) => (notify.value = n)).catch(() => undefined);
+    if (!IS_YANDEX) api.notifyGet().then((n) => (notify.value = n)).catch(() => undefined);
   }, []);
   if (!p) return null;
   const setNotify = (key: string, v: boolean): void => {
@@ -400,7 +392,12 @@ export function SettingsSheet(): JSX.Element | null {
   };
   const abandon = async (): Promise<void> => {
     const r = run.value;
-    if (!r || !window.confirm(t('settings.abandon.confirm', { n: Math.round(BAL.defeatKeep * 100) }))) return;
+    if (!r) return;
+    // Native dialogs are blocked inside the Yandex Games frame: the button asks twice instead.
+    if (!abandonArmed.value) {
+      abandonArmed.value = true;
+      return;
+    }
     try {
       const res = await api.runAbandon(r.id);
       if (res.player) player.value = res.player;
@@ -417,7 +414,7 @@ export function SettingsSheet(): JSX.Element | null {
       <div class="scroll list">
         <div class="item"><span style={{ width: '90px' }}>{t('settings.music')}</span><input type="range" min="0" max="1" step="0.05" value={s.music} id="set-music" onInput={(e) => setSettings({ music: Number((e.target as HTMLInputElement).value) })} /></div>
         <div class="item"><span style={{ width: '90px' }}>{t('settings.sfx')}</span><input type="range" min="0" max="1" step="0.05" value={s.sfx} id="set-sfx" onInput={(e) => setSettings({ sfx: Number((e.target as HTMLInputElement).value) })} /></div>
-        {canFullscreen() && !tg() ? <div class="item between"><span>{t('settings.fullscreen')}</span><Toggle on={fullscreen.value} id="set-fullscreen" onChange={(v) => void setFullscreen(v)} /></div> : null}
+        {canFullscreen() && !tg() && !IS_YANDEX ? <div class="item between"><span>{t('settings.fullscreen')}</span><Toggle on={fullscreen.value} id="set-fullscreen" onChange={(v) => void setFullscreen(v)} /></div> : null}
         <div class="item between"><span>{t('settings.haptics')}</span><Toggle on={s.haptics} id="set-haptics" onChange={(v) => setSettings({ haptics: v })} /></div>
         <div class="item between"><span>{t('settings.calm')}</span><Toggle on={s.calm} id="set-calm" onChange={(v) => setSettings({ calm: v })} /></div>
         <div class="item between">
@@ -436,17 +433,28 @@ export function SettingsSheet(): JSX.Element | null {
             ))}
           </>
         ) : null}
-        <div class="h2">{t('settings.account')}</div>
-        {p.guest ? (
+        {IS_YANDEX ? (
+          p.guest ? (
+            <>
+              <div class="h2">{t('settings.account')}</div>
+              <div class="item col" style={{ alignItems: 'stretch' }}>
+                <span class="muted small">{t('settings.yandex.note')}</span>
+                <Btn class="sm" id="link-yandex" onClick={() => void signIn().then((ok) => ok && location.reload())}>{t('settings.yandex.login')}</Btn>
+              </div>
+            </>
+          ) : null
+        ) : <div class="h2">{t('settings.account')}</div>}
+        {!IS_YANDEX && p.guest ? (
           <div class="item col" style={{ alignItems: 'stretch' }}>
             <span class="muted small">{t('settings.guest')}</span>
             {isTelegram() ? <Btn class="sm" id="link-tg" onClick={() => void link()}>{t('settings.link')}</Btn> : import.meta.env.VITE_BOT_USERNAME ? <LoginWidget bot={import.meta.env.VITE_BOT_USERNAME as string} /> : null}
           </div>
         ) : null}
-        <Btn class="ghost wide" id="invite-btn" onClick={() => void invite()}>{t('settings.invite')}</Btn>
+        {!IS_YANDEX ? <Btn class="ghost wide" id="invite-btn" onClick={() => void invite()}>{t('settings.invite')}</Btn> : null}
         {platformKind() !== 'web' && tg()?.addToHomeScreen ? <Btn class="ghost wide" onClick={() => tg()?.addToHomeScreen?.()}>{t('settings.homescreen')}</Btn> : null}
-        {run.value ? <Btn class="ghost wide" id="abandon-btn" onClick={() => void abandon()}>{t('settings.abandon')}</Btn> : null}
-        <div class="muted tiny center">{t('settings.support')} · v{__APP_VERSION__}</div>
+        {run.value && abandonArmed.value ? <div class="muted small center">{t('settings.abandon.confirm', { n: Math.round(BAL.defeatKeep * 100) })}</div> : null}
+        {run.value ? <Btn class={abandonArmed.value ? 'wide' : 'ghost wide'} id="abandon-btn" onClick={() => void abandon()}>{abandonArmed.value ? t('settings.abandon.yes') : t('settings.abandon')}</Btn> : null}
+        <div class="muted tiny center">{IS_YANDEX ? '' : `${t('settings.support')} · `}v{__APP_VERSION__}</div>
       </div>
     </Sheet>
   );

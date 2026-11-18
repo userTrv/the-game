@@ -7,7 +7,6 @@ import { z } from 'zod';
  *  JWT_SECRET          HS256 key for session tokens
  *  BOT_TOKEN           Telegram bot token: verifies Mini App initData and Login Widget data
  *  INTERNAL_SECRET     shared secret of the server <-> bot internal HTTP API
- *  BOT_INTERNAL_URL    base URL of the bot's internal server (invoices, refunds); empty = shop disabled
  *  PUBLIC_URL          public https URL of the game (links in notifications)
  *  DEV_AUTH            "true" enables /api/dev/* helpers and the mock ad network; never in production
  *  INIT_DATA_MAX_AGE_S max age of Telegram initData (default 86400)
@@ -26,7 +25,6 @@ const Env = z.object({
   JWT_SECRET: z.string().min(1),
   BOT_TOKEN: z.string().min(1),
   INTERNAL_SECRET: z.string().min(1),
-  BOT_INTERNAL_URL: z.string().default(''),
   PUBLIC_URL: z.string().default('http://localhost:5173'),
   DEV_AUTH: z.string().default('false'),
   INIT_DATA_MAX_AGE_S: z.coerce.number().int().default(86400),
@@ -46,7 +44,6 @@ export interface Config {
   jwtSecret: string;
   botToken: string;
   internalSecret: string;
-  botInternalUrl: string;
   publicUrl: string;
   devAuth: boolean;
   initDataMaxAgeS: number;
@@ -73,7 +70,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     jwtSecret: e.JWT_SECRET,
     botToken: e.BOT_TOKEN,
     internalSecret: e.INTERNAL_SECRET,
-    botInternalUrl: e.BOT_INTERNAL_URL.replace(/\/$/, ''),
     publicUrl: e.PUBLIC_URL.replace(/\/$/, ''),
     devAuth: e.DEV_AUTH === 'true',
     initDataMaxAgeS: e.INIT_DATA_MAX_AGE_S,
@@ -95,7 +91,6 @@ export function testConfig(over: Partial<Config> = {}): Config {
     jwtSecret: 'test-jwt',
     botToken: '123456:TEST',
     internalSecret: 'test-internal',
-    botInternalUrl: '',
     publicUrl: 'https://game.test',
     devAuth: false,
     initDataMaxAgeS: 86400,

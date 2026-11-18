@@ -22,13 +22,15 @@ export interface PlayerView {
   profile: Profile;
   quests: QuestState;
   cosmetics: { owned: string[]; equipped: Record<CosmeticKind, string> };
-  pass: { season: string; xp: number; premium: boolean; claimedFree: number[]; claimedPremium: number[] };
+  pass: { season: string; xp: number; claimed: number[] };
   perks: { noAds: boolean; secondChanceTokens: number; saveSlots: number };
   corf: { amount: number; cap: number; full: boolean };
   league: LeagueId;
   inboxUnread: number;
   /** Rewarded ads watched today per placement. */
   adsToday: Partial<Record<AdPlacement, number>>;
+  /** Ad unlock id -> rewarded ads watched towards it (see AD_UNLOCKS). */
+  adUnlocks: Record<string, number>;
   serverTime: number;
 }
 
@@ -53,6 +55,8 @@ export interface EventView {
   myScore: number;
   myRank: number | null;
   top: { name: string; score: number }[];
+  /** Offline builds: rewards by own score instead of a leaderboard. */
+  goals?: { score: number; reward: Cost; cosmetic?: string; reached: boolean }[];
 }
 export interface KrakenView {
   id: string;
@@ -67,7 +71,7 @@ export interface LeagueView {
   trophies: number;
   league: LeagueId;
   season: { id: string; endsAt: number } | null;
-  top: { name: string; trophies: number }[];
+  top: { name: string; trophies: number; rank?: number; me?: boolean }[];
   myRank: number | null;
 }
 export interface LiveopsView {
@@ -108,16 +112,6 @@ export interface InboxItem {
   claimed: boolean;
 }
 
-export interface ShopView {
-  products: { id: string; stars: number; available: boolean; reason?: 'owned' | 'daily_limit' }[];
-  /** False when the bot service is not configured: purchase buttons are hidden. */
-  enabled: boolean;
-}
-export interface OrderView {
-  id: string;
-  productId: string;
-  status: 'pending' | 'paid' | 'refunded';
-}
 export interface AdIntentView {
   id: string;
   placement: AdPlacement;
@@ -173,10 +167,10 @@ export const IdBody = z.object({ id: z.string().min(1).max(64) });
 export const HeroBody = z.object({ heroId: z.string().max(32) });
 export const GardenBody = z.object({ off: z.array(z.string().max(40)).max(100) });
 export const CorfBody = z.object({ adIntentId: z.string().max(64).optional() });
-export const PassClaimBody = z.object({ level: int.min(1).max(100), track: z.enum(['free', 'premium']) });
+export const PassClaimBody = z.object({ level: int.min(1).max(100) });
 export const KrakenClaimBody = z.object({ pct: int.min(1).max(100) });
-export const AdIntentBody = z.object({ placement: z.enum(['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost']) });
-export const InvoiceBody = z.object({ productId: z.string().max(40) });
+export const AdIntentBody = z.object({ placement: z.enum(['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost', 'unlock']) });
+export const AdUnlockBody = z.object({ id: z.string().max(40), adIntentId: z.string().max(64) });
 export const AnalyticsBody = z.object({
   sessionId: z.string().max(64),
   events: z.array(z.object({ type: z.string().max(32), props: z.record(z.string().max(32), z.unknown()).optional(), t: z.number() })).max(50),
