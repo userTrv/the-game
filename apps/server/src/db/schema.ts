@@ -15,9 +15,8 @@ export interface CosmeticsState {
 export interface PassState {
   season: string;
   xp: number;
-  premium: boolean;
-  claimedFree: number[];
-  claimedPremium: number[];
+  /** Claimed levels. Rows from before the single track have claimedFree instead. */
+  claimed: number[];
 }
 export interface PerksState {
   noAds: boolean;

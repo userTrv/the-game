@@ -18,7 +18,7 @@ export interface SaveData {
   profile: Profile;
   quests: QuestState | null;
   cosmetics: { owned: string[]; equipped: Record<CosmeticKind, string> };
-  pass: { season: string; xp: number; premium: boolean; claimedFree: number[]; claimedPremium: number[] };
+  pass: { season: string; xp: number; claimed: number[] };
   lastBuild: (BuildSnapshot & { name: string }) | null;
   run: SavedRun | null;
   /** The last finished run, for the "double loot" ad on the result screen. */
@@ -27,9 +27,8 @@ export interface SaveData {
   adUnlocks: Record<string, number>;
   inbox: InboxItem[];
   event: { id: string; score: number } | null;
-  kraken: { id: string; damage: number; day: string; today: number; claimed: number[] } | null;
-  /** YYYY-MM of the league season the trophies belong to. */
-  season: string;
+  /** Index in LEAGUES of the best league reached; each new one pays once. */
+  leagueBest?: number;
 }
 
 export interface SavedRun {

@@ -1,26 +1,38 @@
 import {
-  AD_DAILY_CAPS, AD_DAILY_TOTAL, AD_UNLOCK_BY_ID, applyQuestDeltas, applyRunAction, applyRunEnd, botGhosts, BOT_STAGES, buildFighter, buildOf,
+  AD_DAILY_CAPS, AD_DAILY_TOTAL, AD_UNLOCK_BY_ID, applyQuestDeltas, applyRunAction, applyRunEnd, botGhosts, BOT_STAGES, buildOf,
   buyTalent, claimMilestone, collectCorf, corfState, CORF_BOOST_MULT, COSMETIC_BY_ID, createRng, DAILY_CHEST_REWARD, dayKey, DEFAULT_EVENTS,
-  eventGoals, eventModifier, eventScore, KRAKEN_ATTACKS_PER_DAY, KRAKEN_DEFAULT_THRESHOLDS, KRAKEN_SOLO_HP, krakenFighter, LEAGUES, leagueOf,
+  eventGoals, eventModifier, eventScore, LEAGUES, leagueOf,
   MetaError, newProfile, PASS_LEVELS, PASS_REWARDS, PASS_XP_PER_LEVEL, publicRun, QUEST_BY_ID, questDeltasForRun, ratePower, refreshQuests,
-  runConfigFor, RunError, runFighter, seasonResetTrophies, selectHero, setGardenOff, simulateBattle, startRun, stageInfo, STAGES_PER_SEGMENT,
+  runConfigFor, RunError, runFighter, selectHero, setGardenOff, startRun, stageInfo, STAGES_PER_SEGMENT,
   upgradeBuilding,
   type AdIntentView, type AdPlacement, type BuildingId, type ClientRunAction, type Cost, type CosmeticKind, type Enemy, type InboxItem,
-  type KrakenAttackResponse, type KrakenView, type LiveEventConfig, type LiveopsView, type MeResponse, type PlayerView, type PublicRun,
+  type LeagueId, type LiveEventConfig, type LiveopsView, type MeResponse, type PlayerView, type PublicRun,
   type RunAction, type RunActionResponse, type RunEnded, type RunEvent, type RunState,
 } from '@shellter/shared';
 import { ApiError } from '../apiError';
-import { getYaPlayer, isAuthorized, now as clock, yandexLang } from '../platform/yandex';
+import { getYaPlayer, isAuthorized, leaderboardTop, now as clock, submitTrophies, yandexLang } from '../platform/yandex';
 import { loadSave, writeSave, type SaveData } from './save';
 
 /**
  * The game without a server: the same API the HTTP client offers, computed in the browser with the
- * shared rules and stored in the Yandex cloud save. Rivals are the fixed bots; events, the Kraken
- * and the league are personal.
+ * shared rules and stored in the Yandex cloud save. Rivals are the fixed bots, events are personal
+ * score goals, the league is the Yandex leaderboard of all-time trophies. No Kraken: it needs a
+ * shared boss.
  */
 
 const DEFAULT_EQUIPPED: Record<CosmeticKind, string> = { crab: 'crab_default', shell: 'shell_default', merge: 'merge_default', town: 'town_default', title: '' };
 const WEEK = 7 * 86_400_000;
+/** Quests the offline build cannot complete. */
+const NO_QUESTS = ['kraken_hit'] as const;
+const LEAGUE_COSMETIC: Partial<Record<LeagueId, string>> = { platinum: 'title_gold_claw', diamond: 'crab_abyss', legend: 'title_reef_legend' };
+const LEAGUE_NAME: Record<LeagueId, { ru: string; en: string }> = {
+  bronze: { ru: 'Бронза', en: 'Bronze' },
+  silver: { ru: 'Серебро', en: 'Silver' },
+  gold: { ru: 'Золото', en: 'Gold' },
+  platinum: { ru: 'Платина', en: 'Platinum' },
+  diamond: { ru: 'Алмаз', en: 'Diamond' },
+  legend: { ru: 'Легенда', en: 'Legend' },
+};
 
 let S: SaveData | null = null;
 
@@ -47,6 +59,7 @@ function tx<T>(fn: (s: SaveData, now: number) => T, important = false): Promise<
     const out = fn(s, now);
     s.savedAt = now;
     writeSave(s, important);
+    submitTrophies(s.profile.trophies);
     return Promise.resolve(out);
   } catch (e) {
     if (e instanceof MetaError || e instanceof RunError) return Promise.reject(new ApiError(e.code, 400));
@@ -77,15 +90,6 @@ function eventById(id: string): LiveEventConfig | null {
   return Number.isFinite(start) ? { ...base, id, startsAt: start, endsAt: start + WEEK } : null;
 }
 
-function currentKraken(now: number): { id: string; hpMax: number; endsAt: number } {
-  const start = weekStart(now);
-  return { id: `kraken_${isoDay(start)}`, hpMax: KRAKEN_SOLO_HP, endsAt: start + WEEK };
-}
-
-function seasonEnd(now: number): number {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
-}
 
 // --- Player -----------------------------------------------------------------------------------------
 
@@ -103,15 +107,15 @@ function addInbox(s: SaveData, now: number, kind: string, title: InboxItem['titl
   s.inbox = [{ id: rid(), kind, title, body, reward, createdAt: now, claimed: false }, ...s.inbox].slice(0, 30);
 }
 
-/** Period changes: quests, pass season, ad counters, finished events, Kraken and league season. */
+/** Period changes: quests, pass season, ad counters, finished events; rewards for a new league. */
 function refresh(s: SaveData, now: number): void {
-  s.quests = refreshQuests(s.quests, s.id, now);
+  s.quests = refreshQuests(s.quests, s.id, now, NO_QUESTS);
   const season = seasonKey(now);
   if (s.pass.season !== season) {
-    s.pass = { season, xp: 0, premium: false, claimedFree: [], claimedPremium: [] };
-    const rest = { ...s.adUnlocks };
-    delete rest.season_pass;
-    s.adUnlocks = rest;
+    s.pass = { season, xp: 0, claimed: [] };
+  } else if (!Array.isArray(s.pass.claimed)) {
+    // Saves from before the single track.
+    s.pass = { season: s.pass.season, xp: s.pass.xp, claimed: (s.pass as { claimedFree?: number[] }).claimedFree ?? [] };
   }
   const day = dayKey(now);
   if (s.ads.day !== day) s.ads = { day, counts: {} };
@@ -127,26 +131,15 @@ function refresh(s: SaveData, now: number): void {
     }
     s.event = null;
   }
-  const k = currentKraken(now);
-  if (s.kraken && s.kraken.id !== k.id) {
-    if (s.kraken.damage >= KRAKEN_SOLO_HP) {
-      addInbox(s, now, 'kraken_down', { ru: 'Кракен повержен!', en: 'The Kraken is down!' },
-        { ru: 'Риф победил.', en: 'The reef won.' }, { coral: 200, shine: 5 });
-    }
-    s.kraken = null;
+  // The leaderboard has no seasons, so trophies are never cut; reaching a league pays once.
+  const reached = LEAGUES.findIndex((l) => l.id === leagueOf(s.profile.trophies));
+  for (let i = (s.leagueBest ?? 0) + 1; i <= reached; i++) {
+    const l = LEAGUES[i] as (typeof LEAGUES)[number];
+    const cosmetic = LEAGUE_COSMETIC[l.id];
+    addInbox(s, now, 'league_up', { ru: 'Новая лига', en: 'New league' }, { ru: `Лига «${LEAGUE_NAME[l.id].ru}».`, en: `${LEAGUE_NAME[l.id].en} league.` },
+      cosmetic ? { coral: 100 * (i + 1), cosmetic } : { coral: 100 * (i + 1) });
   }
-  if (s.season !== season) {
-    const trophies = s.profile.trophies;
-    if (trophies > 0) {
-      const league = leagueOf(trophies);
-      const idx = LEAGUES.findIndex((l) => l.id === league);
-      const cosmetic = league === 'legend' ? 'title_reef_legend' : league === 'diamond' ? 'crab_abyss' : league === 'platinum' ? 'title_gold_claw' : undefined;
-      addInbox(s, now, 'season_result', { ru: 'Сезон завершён', en: 'Season finished' },
-        { ru: 'Награда за лигу.', en: 'Your league reward.' }, cosmetic ? { coral: 100 * (idx + 1), cosmetic } : { coral: 100 * (idx + 1) });
-      s.profile = { ...s.profile, trophies: seasonResetTrophies(trophies) };
-    }
-    s.season = season;
-  }
+  if (reached > (s.leagueBest ?? 0)) s.leagueBest = reached;
 }
 
 function ownedCosmetics(s: SaveData): string[] {
@@ -176,30 +169,14 @@ function view(s: SaveData, now: number): PlayerView {
   };
 }
 
-function krakenView(s: SaveData, now: number): KrakenView {
-  const k = currentKraken(now);
-  const mine = s.kraken?.id === k.id ? s.kraken : null;
-  const dealt = Math.min(k.hpMax, mine?.damage ?? 0);
-  const today = mine && mine.day === dayKey(now) ? mine.today : 0;
-  return {
-    id: k.id,
-    hpMax: k.hpMax,
-    hpLeft: k.hpMax - dealt,
-    endsAt: k.endsAt,
-    myDamage: mine?.damage ?? 0,
-    attacksLeft: Math.max(0, KRAKEN_ATTACKS_PER_DAY - today),
-    thresholds: KRAKEN_DEFAULT_THRESHOLDS.map((t) => ({ pct: t.pct, reward: t.reward, reached: dealt >= (k.hpMax * t.pct) / 100, claimed: mine?.claimed.includes(t.pct) ?? false })),
-  };
-}
-
 function liveopsView(s: SaveData, now: number): LiveopsView {
   refresh(s, now);
   const ev = currentEvent(now);
   const score = s.event?.id === ev.id ? s.event.score : 0;
   return {
     event: { config: ev, myScore: score, myRank: null, top: [], goals: eventGoals(ev, score) },
-    kraken: krakenView(s, now),
-    league: { trophies: s.profile.trophies, league: leagueOf(s.profile.trophies), season: { id: `season_${seasonKey(now)}`, endsAt: seasonEnd(now) }, top: [], myRank: null },
+    kraken: null,
+    league: { trophies: s.profile.trophies, league: leagueOf(s.profile.trophies), season: null, top: [], myRank: null },
   };
 }
 
@@ -213,7 +190,7 @@ function newSave(now: number, name: string, lang: 'ru' | 'en'): SaveData {
     profile: newProfile(now),
     quests: null,
     cosmetics: { owned: [], equipped: { ...DEFAULT_EQUIPPED } },
-    pass: { season: seasonKey(now), xp: 0, premium: false, claimedFree: [], claimedPremium: [] },
+    pass: { season: seasonKey(now), xp: 0, claimed: [] },
     lastBuild: null,
     run: null,
     lastEnded: null,
@@ -221,8 +198,7 @@ function newSave(now: number, name: string, lang: 'ru' | 'en'): SaveData {
     adUnlocks: {},
     inbox: [],
     event: null,
-    kraken: null,
-    season: seasonKey(now),
+    leagueBest: 0,
   };
 }
 
@@ -391,15 +367,13 @@ function meta<T extends object>(fn: (s: SaveData, now: number) => T): Promise<T 
 function unlockGrant(s: SaveData, id: string): void {
   const def = AD_UNLOCK_BY_ID.get(id);
   if (!def) return;
-  if (def.grant.type === 'pass') s.pass = { ...s.pass, premium: true };
-  else grant(s, { cosmetic: def.grant.id });
+  grant(s, { cosmetic: def.grant.id });
 }
 
-/** True when the unlock is already owned (cosmetic) or active (pass this season). */
+/** True when the unlocked cosmetic is already owned. */
 export function unlockOwned(p: PlayerView, id: string): boolean {
   const def = AD_UNLOCK_BY_ID.get(id);
-  if (!def) return true;
-  return def.grant.type === 'pass' ? p.pass.premium : p.cosmetics.owned.includes(def.grant.id);
+  return !def || p.cosmetics.owned.includes(def.grant.id);
 }
 
 // --- The API ----------------------------------------------------------------------------------------
@@ -510,21 +484,14 @@ export const localApi = {
       s.pass = { ...s.pass, xp: Math.min(PASS_LEVELS * PASS_XP_PER_LEVEL, s.pass.xp + def.reward.passXp) };
       return { reward: def.reward as Cost };
     }),
-  passClaim: (level: number, lane: 'free' | 'premium') =>
+  passClaim: (level: number) =>
     meta((s) => {
       const def = PASS_REWARDS.find((r) => r.level === level);
       if (!def) fail('pass_unknown');
       if (Math.floor(s.pass.xp / PASS_XP_PER_LEVEL) < level) fail('pass_locked');
-      if (lane === 'free') {
-        if (s.pass.claimedFree.includes(level)) fail('pass_claimed');
-        s.pass = { ...s.pass, claimedFree: [...s.pass.claimedFree, level] };
-        grant(s, def.free);
-      } else {
-        if (!s.pass.premium) fail('pass_premium');
-        if (s.pass.claimedPremium.includes(level)) fail('pass_claimed');
-        s.pass = { ...s.pass, claimedPremium: [...s.pass.claimedPremium, level] };
-        grant(s, def.premium);
-      }
+      if (s.pass.claimed.includes(level)) fail('pass_claimed');
+      s.pass = { ...s.pass, claimed: [...s.pass.claimed, level] };
+      grant(s, def.reward);
       return {};
     }),
   equip: (id: string) =>
@@ -535,36 +502,14 @@ export const localApi = {
       s.cosmetics = { ...s.cosmetics, equipped: { ...s.cosmetics.equipped, [def.kind]: def.kind === 'title' && current === id ? '' : id } };
       return {};
     }),
-  liveops: (): Promise<LiveopsView> => tx((s, now) => liveopsView(s, now)),
-  krakenAttack: (): Promise<KrakenAttackResponse> =>
-    tx((s, now) => {
-      refresh(s, now);
-      const k = currentKraken(now);
-      if (!s.lastBuild) fail('no_build');
-      const day = dayKey(now);
-      const mine = s.kraken?.id === k.id ? s.kraken : { id: k.id, damage: 0, day, today: 0, claimed: [] };
-      const today = mine.day === day ? mine.today : 0;
-      if (today >= KRAKEN_ATTACKS_PER_DAY) fail('no_attacks');
-      const seed = `kraken/${k.id}/${s.id}/${rid(6)}`;
-      const result = simulateBattle(buildFighter(s.lastBuild), krakenFighter(), seed);
-      let dealt = 0;
-      for (const v of Object.values(result.damage[0])) dealt += v;
-      const damage = Math.max(0, Math.min(Math.round(dealt), k.hpMax - Math.min(k.hpMax, mine.damage)));
-      s.kraken = { ...mine, damage: mine.damage + damage, day, today: today + 1 };
-      if (s.quests) s.quests = applyQuestDeltas(s.quests, { kraken_hit: 1 });
-      return { damage, seed, build: s.lastBuild, result, kraken: krakenView(s, now), player: view(s, now) };
-    }, true),
-  krakenClaim: (pct: number) =>
-    meta((s, now) => {
-      const v = krakenView(s, now);
-      const th = v.thresholds.find((t) => t.pct === pct);
-      if (!th || !s.kraken) fail('no_kraken');
-      if (!th.reached) fail('kraken_not_reached');
-      if (th.claimed) fail('kraken_claimed');
-      s.kraken = { ...s.kraken, claimed: [...s.kraken.claimed, pct] };
-      grant(s, th.reward);
-      return { reward: th.reward };
-    }),
+  liveops: async (): Promise<LiveopsView> => {
+    const l = await tx((s, now) => liveopsView(s, now));
+    const board = await leaderboardTop();
+    if (board) l.league = { ...l.league, top: board.top.map((x) => ({ name: x.name, trophies: x.score, rank: x.rank, me: x.me })), myRank: board.myRank };
+    return l;
+  },
+  krakenAttack: unsupported,
+  krakenClaim: unsupported,
   inbox: (): Promise<{ items: InboxItem[] }> => tx((s, now) => {
     refresh(s, now);
     return { items: s.inbox.map((x) => ({ ...x })) };

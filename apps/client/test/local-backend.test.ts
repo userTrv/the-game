@@ -86,17 +86,19 @@ describe('offline backend (Yandex Games build)', () => {
     expect((await localApi.equip('crab_azure')).player.cosmetics.equipped.crab).toBe('crab_azure');
   });
 
-  it('the premium pass bought with ads lasts one season; the next month resets it', async () => {
-    const need = AD_UNLOCK_BY_ID.get('season_pass')?.views ?? 0;
+  it('the pass has one free track with looks on some levels; the next month starts it over', async () => {
     vi.setSystemTime(Date.UTC(2026, 10, 12, 12));
-    let p = (await localApi.me()).player;
-    for (let i = 0; i < need; i++) p = (await localApi.adUnlock('season_pass', await watched('unlock'))).player;
-    expect(p.pass.premium).toBe(true);
+    await expect(localApi.passClaim(1)).rejects.toMatchObject({ code: 'pass_locked' });
+    const save = JSON.parse(store.get('shellter_save') ?? 'null') as { pass: { xp: number } };
+    save.pass.xp = 500;
+    store.set('shellter_save', JSON.stringify(save));
+    await openLocalSave();
+    expect((await localApi.passClaim(5)).player.cosmetics.owned).toContain('merge_bubbles');
+    await expect(localApi.passClaim(5)).rejects.toMatchObject({ code: 'pass_claimed' });
     vi.setSystemTime(Date.UTC(2026, 11, 2, 12));
     const me = await localApi.me();
-    expect(me.player.pass.premium).toBe(false);
-    expect(me.player.adUnlocks.season_pass).toBeUndefined();
-    // A new month also closed the league season and left a result in the mailbox when trophies were won.
+    expect(me.player.pass).toMatchObject({ xp: 0, claimed: [] });
+    expect(me.player.cosmetics.owned).toContain('merge_bubbles');
     expect(me.liveops.event?.goals?.length).toBeGreaterThan(0);
   });
 
@@ -109,5 +111,28 @@ describe('offline backend (Yandex Games build)', () => {
     if (score > 0) expect(inbox.items.some((x) => x.kind === 'event_result')).toBe(true);
     const item = inbox.items.find((x) => !x.claimed && x.reward);
     if (item) expect((await localApi.inboxClaim(item.id)).player.inboxUnread).toBeLessThan(inbox.items.filter((x) => !x.claimed).length);
+  });
+
+  it('no Kraken; the league never resets and pays once per new league', async () => {
+    const l = await localApi.liveops();
+    expect(l.kraken).toBeNull();
+    expect(l.league.season).toBeNull();
+    await expect(localApi.krakenAttack()).rejects.toMatchObject({ code: 'unsupported' });
+    for (const w of [0, 1, 2, 3, 4, 5]) {
+      vi.setSystemTime(Date.UTC(2027, 0, 4 + 7 * w, 12));
+      expect((await localApi.me()).player.quests.weekly.map((q) => q.id)).not.toContain('w_kraken');
+    }
+
+    const save = JSON.parse(store.get('shellter_save') ?? 'null') as { profile: { trophies: number } };
+    save.profile.trophies = 950;
+    store.set('shellter_save', JSON.stringify(save));
+    await openLocalSave();
+    const ups = (await localApi.inbox()).items.filter((x) => x.kind === 'league_up');
+    expect(ups).toHaveLength(3);
+    expect(ups.some((x) => x.reward?.cosmetic === 'title_gold_claw')).toBe(true);
+    vi.setSystemTime(Date.UTC(2027, 3, 2, 12));
+    const later = await localApi.me();
+    expect(later.player.profile.trophies).toBe(950);
+    expect((await localApi.inbox()).items.filter((x) => x.kind === 'league_up')).toHaveLength(3);
   });
 });

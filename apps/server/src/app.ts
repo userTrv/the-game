@@ -297,21 +297,14 @@ export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { 
     });
   });
   r.post('/api/pass/claim', async (req) => {
-    const { level, track: lane } = PassClaimBody.parse(req.body);
+    const { level } = PassClaimBody.parse(req.body);
     return meta(req, (_tx, row) => {
       const def = PASS_REWARDS.find((r) => r.level === level);
       if (!def) throw new ApiFail('pass_unknown');
       if (Math.floor(row.pass.xp / PASS_XP_PER_LEVEL) < level) throw new ApiFail('pass_locked');
-      if (lane === 'free') {
-        if (row.pass.claimedFree.includes(level)) throw new ApiFail('pass_claimed');
-        row.pass = { ...row.pass, claimedFree: [...row.pass.claimedFree, level] };
-        grant(row, def.free);
-      } else {
-        if (!row.pass.premium) throw new ApiFail('pass_premium');
-        if (row.pass.claimedPremium.includes(level)) throw new ApiFail('pass_claimed');
-        row.pass = { ...row.pass, claimedPremium: [...row.pass.claimedPremium, level] };
-        grant(row, def.premium);
-      }
+      if (row.pass.claimed.includes(level)) throw new ApiFail('pass_claimed');
+      row.pass = { ...row.pass, claimed: [...row.pass.claimed, level] };
+      grant(row, def.reward);
       return {};
     });
   });

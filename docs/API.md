@@ -22,7 +22,7 @@ interface PlayerView {
   profile: Profile;          // shared/meta.ts
   quests: QuestState;        // shared/liveops.ts (уже обновлены на текущий день и неделю)
   cosmetics: { owned: string[]; equipped: Record<CosmeticKind, string> };
-  pass: { season: string; xp: number; premium: boolean; claimedFree: number[]; claimedPremium: number[] };
+  pass: { season: string; xp: number; claimed: number[] };
   perks: { noAds: boolean; secondChanceTokens: number; saveSlots: number };
   corf: { amount: number; cap: number; full: boolean };
   league: LeagueId;
@@ -57,7 +57,7 @@ interface RunEnded {            // приходит, когда забег за�
 | `POST /api/corf/collect` | `{ adIntentId?: string }` | `{ player, gained }` |
 | `POST /api/almanac/claim` | `{ id }` | `{ player, reward }` |
 | `POST /api/quests/claim` | `{ id }` | `{ player, reward }` |
-| `POST /api/pass/claim` | `{ level, track: 'free' \| 'premium' }` | `{ player }` |
+| `POST /api/pass/claim` | `{ level }` | `{ player }` |
 | `POST /api/cosmetics/equip` | `{ id }` | `{ player }` |
 | `GET /api/liveops` | — | `LiveopsView` |
 | `POST /api/kraken/attack` | — | `{ damage, seed, build, kraken, player }` |

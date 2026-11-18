@@ -69,21 +69,17 @@ export function QuestsSheet(): JSX.Element | null {
         ) : (
           <>
             <div class="row between small"><span>{t('quests.pass.level', { n: level })}</span><span class="muted">{p.pass.xp % PASS_XP_PER_LEVEL}/{PASS_XP_PER_LEVEL}</span></div>
-            {!p.pass.premium ? <Btn class="gold sm" id="pass-buy" onClick={() => (panel.value = 'shop')}>{t('quests.pass.buy')}</Btn> : null}
             {PASS_REWARDS.map((r) => {
               const open = level >= r.level;
-              const fc = p.pass.claimedFree.includes(r.level);
-              const pc = p.pass.claimedPremium.includes(r.level);
+              const done = p.pass.claimed.includes(r.level);
               return (
                 <div class="item" key={r.level} style={{ opacity: open ? 1 : 0.55 }}>
                   <b style={{ width: '22px' }}>{r.level}</b>
-                  <div class="grow col" style={{ gap: '3px' }}>
-                    <div class="row between tiny"><CostView cost={r.free} />{fc ? '✓' : <Btn class="sm ok" id={`pass-free-${r.level}`} disabled={!open} onClick={() => void meta(() => api.passClaim(r.level, 'free')).then((x) => x && sfx('reward'))}>{t('common.claim')}</Btn>}</div>
-                    <div class="row between tiny" style={{ color: 'var(--gold)' }}>
-                      <span class="row">★ {r.premium.cosmetic ? t(`cosmetic.${r.premium.cosmetic}`) : <CostView cost={{ coral: r.premium.coral ?? 0, shine: r.premium.shine ?? 0 }} />}</span>
-                      {pc ? '✓' : <Btn class="sm gold" disabled={!open || !p.pass.premium} onClick={() => void meta(() => api.passClaim(r.level, 'premium')).then((x) => x && sfx('reward'))}>{p.pass.premium ? t('common.claim') : '🔒'}</Btn>}
-                    </div>
+                  <div class="grow col tiny" style={{ gap: '3px' }}>
+                    <CostView cost={r.reward} />
+                    {r.reward.cosmetic ? <span style={{ color: 'var(--gold)' }}>{t(`cosmetic.${r.reward.cosmetic}`)}</span> : null}
                   </div>
+                  {done ? '✓' : <Btn class="sm ok" id={`pass-claim-${r.level}`} disabled={!open} onClick={() => void meta(() => api.passClaim(r.level)).then((x) => x && sfx('reward'))}>{t('common.claim')}</Btn>}
                 </div>
               );
             })}
@@ -129,7 +125,7 @@ export function EventsSheet(): JSX.Element | null {
     <Sheet title={t('events.title')} onClose={close} id="events-sheet">
       <div class="tabs">
         <button class={tab.value === 'event' ? 'on' : ''} onClick={() => (tab.value = 'event')}>{t('nav.events')}</button>
-        <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button>
+        {l?.kraken ? <button class={tab.value === 'kraken' ? 'on' : ''} id="tab-kraken" onClick={() => (tab.value = 'kraken')}>{t('kraken.title')}</button> : null}
         <button class={tab.value === 'league' ? 'on' : ''} id="tab-league" onClick={() => (tab.value = 'league')}>{t('league.title')}</button>
       </div>
       <div class="scroll list" style={{ minHeight: '330px' }}>
@@ -189,11 +185,16 @@ export function EventsSheet(): JSX.Element | null {
           <>
             <div class="panel light col">
               <div class="row between"><span class="h2">{t(`league.${l.league.league}`)}</span><Res kind="trophy" value={l.league.trophies} /></div>
-              <div class="muted small">{t('league.desc')}</div>
+              <div class="muted small">{t(IS_YANDEX ? 'league.desc.ya' : 'league.desc')}</div>
               <div class="row wrap" style={{ gap: '4px' }}>{LEAGUES.map((x) => <span class="chip tiny" key={x.id} style={{ opacity: x.id === l.league.league ? 1 : 0.5 }}>{t(`league.${x.id}`)} {x.min}+</span>)}</div>
               {l.league.season ? <div class="tiny muted">{t('league.season', { t: duration(l.league.season.endsAt - now) })}{l.league.myRank ? ` · ${t('events.rank', { n: l.league.myRank })}` : ''}</div> : null}
             </div>
-            {IS_YANDEX ? null : l.league.top.length === 0 ? <div class="muted small center">{t('league.empty')}</div> : l.league.top.map((x, i) => <div class="item small" key={i}><b style={{ width: '24px' }}>{i + 1}</b><span class="grow">{x.name}</span><Spr id="icon/trophy" size={16} />{num(x.trophies)}</div>)}
+            {IS_YANDEX && p.guest ? (
+              <div class="item small"><span class="grow muted">{t('league.signin')}</span><Btn class="sm" id="league-signin" onClick={() => void signIn().then((ok) => ok && location.reload())}>{t('settings.yandex.login')}</Btn></div>
+            ) : null}
+            {l.league.top.length === 0 ? <div class="muted small center">{t('league.empty')}</div> : l.league.top.map((x, i) => (
+              <div class={`item small ${x.me ? 'done' : ''}`} key={i}><b style={{ width: '32px' }}>{x.rank ?? i + 1}</b><span class="grow">{x.name}</span><Spr id="icon/trophy" size={16} />{num(x.trophies)}</div>
+            ))}
           </>
         ) : null}
       </div>
@@ -204,14 +205,14 @@ export function EventsSheet(): JSX.Element | null {
 // --- Shop ------------------------------------------------------------------------------------------
 
 function unlockOwned(p: PlayerView, u: AdUnlockDef): boolean {
-  return u.grant.type === 'pass' ? p.pass.premium : p.cosmetics.owned.includes(u.grant.id);
+  return p.cosmetics.owned.includes(u.grant.id);
 }
 
 function UnlockArt({ u }: { u: AdUnlockDef }): JSX.Element {
-  const id = u.grant.type === 'cosmetic' ? u.grant.id : '';
+  const id = u.grant.id;
   if (id.startsWith('crab_')) return <Spr id={`crab/${id}/body`} size={44} />;
   if (id.startsWith('shell_')) return <Spr id={`shell/paint_${id}`} size={48} />;
-  return <span style={{ fontSize: '30px' }}>{u.grant.type === 'pass' ? '🎫' : '✨'}</span>;
+  return <span style={{ fontSize: '30px' }}>✨</span>;
 }
 
 export function ShopSheet(): JSX.Element | null {
@@ -262,7 +263,6 @@ export function ShopSheet(): JSX.Element | null {
               <div class="card" style={{ minHeight: '120px' }} key={u.id} id={`unlock-${u.id}`}>
                 <UnlockArt u={u} />
                 <div class="nm">{t(`product.${u.id}`)}</div>
-                {u.grant.type === 'pass' ? <div class="ds">{t('product.season_pass.desc')}</div> : null}
                 {owned ? (
                   <span class="price">{t('shop.owned')}</span>
                 ) : (

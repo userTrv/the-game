@@ -6,7 +6,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { langOf, randomId, type TgUser } from './auth';
 import type { Config } from './config';
 import type { Db, Tx } from './db';
-import { adIntents, analytics, inbox, players, referrals, type CosmeticsState, type Reward } from './db/schema';
+import { adIntents, analytics, inbox, players, referrals, type CosmeticsState, type PassState, type Reward } from './db/schema';
 
 export type PlayerRow = typeof players.$inferSelect;
 
@@ -47,7 +47,7 @@ export async function createPlayer(tx: Tx, now: number, opts: { tg?: TgUser; gue
     profile: newProfile(now),
     quests: null,
     cosmetics: { owned: [], equipped: { ...DEFAULT_EQUIPPED } },
-    pass: { season: seasonKey(now), xp: 0, premium: false, claimedFree: [], claimedPremium: [] },
+    pass: { season: seasonKey(now), xp: 0, claimed: [] },
     perks: { noAds: false, secondChanceTokens: 0, saveSlots: 1 },
     notify: { enabled: true, corf: true, events: true, kraken: true, last: {} },
     lastBuild: null,
@@ -115,13 +115,11 @@ export function refreshPlayer(row: PlayerRow, now: number): boolean {
   }
   const season = seasonKey(now);
   if (row.pass.season !== season) {
-    row.pass = { season, xp: 0, premium: false, claimedFree: [], claimedPremium: [] };
-    // Ad views towards the premium pass belong to the season that ended.
-    if (row.cosmetics.adViews?.season_pass) {
-      const views = { ...row.cosmetics.adViews };
-      delete views.season_pass;
-      row.cosmetics = { ...row.cosmetics, adViews: views };
-    }
+    row.pass = { season, xp: 0, claimed: [] };
+    changed = true;
+  } else if (!Array.isArray(row.pass.claimed)) {
+    const legacy = row.pass as PassState & { claimedFree?: number[] };
+    row.pass = { season: legacy.season, xp: legacy.xp, claimed: legacy.claimedFree ?? [] };
     changed = true;
   }
   return changed;

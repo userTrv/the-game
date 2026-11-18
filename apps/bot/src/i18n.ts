@@ -56,7 +56,7 @@ const ru = {
     '<b>Условия использования Shellter</b>\n\n' +
     '1. Shellter — бесплатная игра. Внутриигровые предметы действуют только в игре и не имеют денежной ' +
     'стоимости. Покупок за деньги в игре нет.\n' +
-    '2. Облики и премиум-дорожку сезона можно открыть просмотром рекламы. Ничто из этого не влияет на силу в забеге.\n' +
+    '2. Облики можно открыть просмотром рекламы. Это не влияет на силу в забеге.\n' +
     '3. Прогресс привязан к аккаунту Telegram. Игра развивается, поэтому баланс и содержимое могут ' +
     'меняться. За читы и злоупотребление ошибками доступ может быть ограничен.\n' +
     '4. Игра предоставляется «как есть». Мы стараемся, чтобы всё работало, но не можем обещать ' +
@@ -108,7 +108,7 @@ const en: Record<MessageKey, string> = {
     '<b>Shellter terms of service</b>\n\n' +
     '1. Shellter is a free game. In-game items work only inside the game and have no monetary value. ' +
     'There are no purchases for money.\n' +
-    '2. Looks and the premium season track can be unlocked by watching ads. None of it affects strength in a run.\n' +
+    '2. Looks can be unlocked by watching ads. They do not affect strength in a run.\n' +
     '3. Progress is tied to your Telegram account. The game is evolving, so balance and content may ' +
     'change. Cheating or abusing bugs may lead to restricted access.\n' +
     '4. The game is provided “as is”. We do our best to keep it running but cannot promise uninterrupted ' +

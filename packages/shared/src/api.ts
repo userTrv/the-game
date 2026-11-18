@@ -22,7 +22,7 @@ export interface PlayerView {
   profile: Profile;
   quests: QuestState;
   cosmetics: { owned: string[]; equipped: Record<CosmeticKind, string> };
-  pass: { season: string; xp: number; premium: boolean; claimedFree: number[]; claimedPremium: number[] };
+  pass: { season: string; xp: number; claimed: number[] };
   perks: { noAds: boolean; secondChanceTokens: number; saveSlots: number };
   corf: { amount: number; cap: number; full: boolean };
   league: LeagueId;
@@ -71,7 +71,7 @@ export interface LeagueView {
   trophies: number;
   league: LeagueId;
   season: { id: string; endsAt: number } | null;
-  top: { name: string; trophies: number }[];
+  top: { name: string; trophies: number; rank?: number; me?: boolean }[];
   myRank: number | null;
 }
 export interface LiveopsView {
@@ -167,7 +167,7 @@ export const IdBody = z.object({ id: z.string().min(1).max(64) });
 export const HeroBody = z.object({ heroId: z.string().max(32) });
 export const GardenBody = z.object({ off: z.array(z.string().max(40)).max(100) });
 export const CorfBody = z.object({ adIntentId: z.string().max(64).optional() });
-export const PassClaimBody = z.object({ level: int.min(1).max(100), track: z.enum(['free', 'premium']) });
+export const PassClaimBody = z.object({ level: int.min(1).max(100) });
 export const KrakenClaimBody = z.object({ pct: int.min(1).max(100) });
 export const AdIntentBody = z.object({ placement: z.enum(['double_loot', 'second_chance', 'daily_chest', 'reroll', 'corf_boost', 'unlock']) });
 export const AdUnlockBody = z.object({ id: z.string().max(40), adIntentId: z.string().max(64) });

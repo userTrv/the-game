@@ -87,23 +87,26 @@ export function weekKey(ms: number): string {
   return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-function rollQuests(period: 'daily' | 'weekly', count: number, seed: string): QuestProgress[] {
-  const pool = QUESTS.filter((x) => x.period === period);
+function rollQuests(period: 'daily' | 'weekly', count: number, seed: string, exclude: readonly QuestMetric[]): QuestProgress[] {
+  const pool = QUESTS.filter((x) => x.period === period && !exclude.includes(x.metric));
   return createRng(seed)
     .shuffle(pool)
     .slice(0, count)
     .map((x) => ({ id: x.id, progress: 0, claimed: false }));
 }
 
-/** Rolls new daily/weekly quests when the period changed. Deterministic per player and period. */
-export function refreshQuests(state: QuestState | null, playerId: string, now: number): QuestState {
+/**
+ * Rolls new daily/weekly quests when the period changed. Deterministic per player and period.
+ * `exclude` drops metrics a build cannot progress (the Kraken in the offline build).
+ */
+export function refreshQuests(state: QuestState | null, playerId: string, now: number, exclude: readonly QuestMetric[] = []): QuestState {
   const day = dayKey(now);
   const week = weekKey(now);
   return {
     day,
-    daily: state && state.day === day ? state.daily : rollQuests('daily', DAILY_QUESTS, `q/${playerId}/${day}`),
+    daily: state && state.day === day ? state.daily : rollQuests('daily', DAILY_QUESTS, `q/${playerId}/${day}`, exclude),
     week,
-    weekly: state && state.week === week ? state.weekly : rollQuests('weekly', WEEKLY_QUESTS, `q/${playerId}/${week}`),
+    weekly: state && state.week === week ? state.weekly : rollQuests('weekly', WEEKLY_QUESTS, `q/${playerId}/${week}`, exclude),
   };
 }
 
@@ -343,7 +346,7 @@ export const COSMETIC_BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETIC
  * Things unlocked by watching rewarded ads, one view at a time. Progress is kept, so a player can
  * spread the views over several sessions. Nothing here changes battle strength.
  */
-export type AdUnlockGrant = { type: 'cosmetic'; id: string } | { type: 'pass' };
+export type AdUnlockGrant = { type: 'cosmetic'; id: string };
 
 export interface AdUnlockDef {
   id: string;
@@ -359,23 +362,21 @@ export const AD_UNLOCKS: readonly AdUnlockDef[] = [
   { id: 'town_lanterns', views: 5, grant: { type: 'cosmetic', id: 'town_lanterns' } },
   { id: 'shell_candy', views: 7, grant: { type: 'cosmetic', id: 'shell_candy' } },
   { id: 'shell_galaxy', views: 7, grant: { type: 'cosmetic', id: 'shell_galaxy' } },
-  { id: 'season_pass', views: 12, grant: { type: 'pass' } },
 ];
 export const AD_UNLOCK_BY_ID: ReadonlyMap<string, AdUnlockDef> = new Map(AD_UNLOCKS.map((x) => [x.id, x]));
 
-/** Season pass: XP comes from quests; the free track gives resources, the premium one (unlocked by ads) cosmetics. */
+/** Season pass: one free track. XP comes from quests; levels give resources, three of them a look. */
 export const PASS_XP_PER_LEVEL = 100;
 export const PASS_LEVELS = 20;
 export interface PassReward {
   level: number;
-  free: Cost;
-  premium: { cosmetic?: string; coral?: number; shine?: number };
+  reward: { coral: number; shine: number; cosmetic?: string };
 }
+const PASS_COSMETICS: Readonly<Record<number, string>> = { 5: 'merge_bubbles', 12: 'shell_pearl', 20: 'crab_gold' };
 export const PASS_REWARDS: readonly PassReward[] = Array.from({ length: PASS_LEVELS }, (_, i) => {
   const level = i + 1;
-  const premium: PassReward['premium'] =
-    level === 5 ? { cosmetic: 'merge_bubbles' } : level === 12 ? { cosmetic: 'shell_pearl' } : level === 20 ? { cosmetic: 'crab_gold' } : { coral: 60 + 15 * level, shine: level % 2 === 0 ? 3 : 0 };
-  return { level, free: { coral: 30 + 10 * level, shine: level % 5 === 0 ? 5 : 0 }, premium };
+  const cosmetic = PASS_COSMETICS[level];
+  return { level, reward: { coral: 30 + 10 * level, shine: level % 5 === 0 ? 5 : 0, ...(cosmetic ? { cosmetic } : {}) } };
 });
 
 // --- Rewarded ads --------------------------------------------------------------------------------------------

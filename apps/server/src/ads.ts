@@ -79,22 +79,20 @@ export async function dailyChest(ctx: Ctx, playerId: string, adIntentId: string)
   });
 }
 
-/** One rewarded ad towards a cosmetic or the premium pass; the last required view unlocks it. */
+/** One rewarded ad towards a cosmetic; the last required view unlocks it. */
 export async function adUnlock(ctx: Ctx, playerId: string, id: string, adIntentId: string) {
   const now = ctx.now();
   return withPlayer(ctx, playerId, async (tx, row) => {
     const def = AD_UNLOCK_BY_ID.get(id);
     if (!def) throw new ApiFail('unlock_unknown');
-    const owned = def.grant.type === 'pass' ? row.pass.premium : row.cosmetics.owned.includes(def.grant.id);
-    if (owned) throw new ApiFail('unlock_owned');
+    if (row.cosmetics.owned.includes(def.grant.id)) throw new ApiFail('unlock_owned');
     if (!(await consumeAd(tx, ctx, row, adIntentId, 'unlock'))) throw new ApiFail('ad_not_verified');
     const views = { ...(row.cosmetics.adViews ?? {}) };
     const n = (views[id] ?? 0) + 1;
     const unlocked = n >= def.views;
     if (unlocked) {
       delete views[id];
-      if (def.grant.type === 'pass') row.pass = { ...row.pass, premium: true };
-      else grant(row, { cosmetic: def.grant.id });
+      grant(row, { cosmetic: def.grant.id });
     } else views[id] = n;
     row.cosmetics = { ...row.cosmetics, adViews: views };
     if (unlocked) await track(tx, now, playerId, 'ad_unlock', { id });

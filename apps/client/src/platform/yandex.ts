@@ -31,9 +31,20 @@ export interface YaSdk {
     showRewardedVideo(opts: { callbacks?: YaAdCallbacks }): void;
   };
   auth: { openAuthDialog(): Promise<void> };
+  leaderboards?: {
+    setScore(name: string, score: number): Promise<void>;
+    getEntries(name: string, opts: { includeUser?: boolean; quantityAround?: number; quantityTop?: number }): Promise<YaLeaderboardEntries>;
+  };
+  isAvailableMethod?(method: string): Promise<boolean>;
   getPlayer(opts?: { scopes?: boolean; signed?: boolean }): Promise<YaPlayer>;
   serverTime?(): number;
   on(event: 'game_api_pause' | 'game_api_resume', cb: () => void): void;
+}
+
+interface YaLeaderboardEntries {
+  /** 0 when the player has no entry. */
+  userRank: number;
+  entries: { rank: number; score: number; player: { publicName: string; uniqueID: string } }[];
 }
 
 declare global {
@@ -219,4 +230,76 @@ export function showInterstitial(): Promise<boolean> {
       done(false);
     }
   });
+}
+
+// --- Leaderboard ----------------------------------------------------------------------------------
+
+/** Technical name of the league leaderboard in the developer console (numeric, descending). */
+export const LEADERBOARD = 'trophies';
+/** setScore allows one call per second. */
+const SCORE_GAP_MS = 1100;
+/** getEntries allows 20 calls per 5 minutes. */
+const ENTRIES_TTL_MS = 30_000;
+
+let scoreSent: number | null = null;
+let scorePending: number | null = null;
+let scoreTimer: ReturnType<typeof setTimeout> | null = null;
+let scoreLastAt = 0;
+
+async function canSetScore(): Promise<boolean> {
+  if (!sdk?.leaderboards || !isAuthorized()) return false;
+  try {
+    return (await sdk.isAvailableMethod?.('leaderboards.setScore')) ?? true;
+  } catch {
+    return false;
+  }
+}
+
+async function flushScore(): Promise<void> {
+  scoreTimer = null;
+  const score = scorePending;
+  if (score === null || score === scoreSent || !(await canSetScore())) return;
+  scorePending = null;
+  scoreLastAt = Date.now();
+  try {
+    await sdk?.leaderboards?.setScore(LEADERBOARD, score);
+    scoreSent = score;
+    entriesCache = null;
+  } catch {
+    // Rate limit or network: the next change sends the current value again.
+  }
+}
+
+/** Sends the player's trophies to the leaderboard; signed-in players only, at most once per second. */
+export function submitTrophies(score: number): void {
+  if (!sdk || score === scoreSent) return;
+  scorePending = Math.max(0, Math.floor(score));
+  if (scoreTimer) return;
+  scoreTimer = setTimeout(() => void flushScore(), Math.max(0, scoreLastAt + SCORE_GAP_MS - Date.now()));
+}
+
+export interface LeaderboardTop {
+  top: { rank: number; name: string; score: number; me: boolean }[];
+  myRank: number | null;
+}
+
+let entriesCache: { at: number; data: LeaderboardTop } | null = null;
+
+/** Top of the league leaderboard plus the player's own row; cached to respect the request limit. */
+export async function leaderboardTop(): Promise<LeaderboardTop | null> {
+  if (!sdk?.leaderboards) return null;
+  if (entriesCache && Date.now() - entriesCache.at < ENTRIES_TTL_MS) return entriesCache.data;
+  try {
+    const me = yaPlayer?.getUniqueID();
+    const auth = isAuthorized();
+    const res = await sdk.leaderboards.getEntries(LEADERBOARD, { quantityTop: 10, includeUser: auth, quantityAround: auth ? 2 : 0 });
+    const data: LeaderboardTop = {
+      top: res.entries.map((e) => ({ rank: e.rank, name: e.player.publicName || '—', score: e.score, me: !!me && e.player.uniqueID === me })),
+      myRank: res.userRank > 0 ? res.userRank : null,
+    };
+    entriesCache = { at: Date.now(), data };
+    return data;
+  } catch {
+    return null;
+  }
 }

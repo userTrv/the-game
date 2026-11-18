@@ -64,11 +64,13 @@ describe('town and meta', () => {
     expect((await h.call<Err>('POST', '/api/quests/claim', { id: q.daily[0]!.id }, a.token)).body.error.code).toBe('quest_claimed');
     expect((await h.call<Err>('POST', '/api/quests/claim', { id: q.daily[1]!.id }, a.token)).body.error.code).toBe('quest_incomplete');
 
-    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 1, track: 'free' }, a.token)).body.error.code).toBe('pass_locked');
+    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 1 }, a.token)).body.error.code).toBe('pass_locked');
     await h.handle.db.update(players).set({ pass: { ...claim.body.player.pass, xp: 250 } }).where(eq(players.id, a.player.id));
-    expect((await h.call('POST', '/api/pass/claim', { level: 1, track: 'free' }, a.token)).status).toBe(200);
-    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 1, track: 'free' }, a.token)).body.error.code).toBe('pass_claimed');
-    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 1, track: 'premium' }, a.token)).body.error.code).toBe('pass_premium');
+    expect((await h.call('POST', '/api/pass/claim', { level: 1 }, a.token)).status).toBe(200);
+    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 1 }, a.token)).body.error.code).toBe('pass_claimed');
+    expect((await h.call<Err>('POST', '/api/pass/claim', { level: 5 }, a.token)).body.error.code).toBe('pass_locked');
+    await h.handle.db.update(players).set({ pass: { ...claim.body.player.pass, xp: 500, claimed: [1] } }).where(eq(players.id, a.player.id));
+    expect((await h.call<P>('POST', '/api/pass/claim', { level: 5 }, a.token)).body.player.cosmetics.owned).toContain('merge_bubbles');
 
     expect((await h.call<Err>('POST', '/api/cosmetics/equip', { id: 'crab_azure' }, a.token)).body.error.code).toBe('cosmetic_locked');
     expect((await h.call<Err>('POST', '/api/almanac/claim', { id: 'guardians_4' }, a.token)).body.error.code).toBe('milestone_locked');
