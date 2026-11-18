@@ -2,7 +2,8 @@ import type { AdPlacement } from '@shellter/shared';
 import { api, ApiError } from '../api';
 import { rewardIntent } from '../local/backend';
 import { platformKind } from './telegram';
-import { IS_YANDEX, showRewarded, ysdk } from './yandex';
+import { interstitialDue } from './interstitial';
+import { IS_YANDEX, showInterstitial, showRewarded, ysdk } from './yandex';
 
 /**
  * Rewarded ads behind a provider-agnostic interface. A provider only shows the ad; the reward is
@@ -124,4 +125,25 @@ export async function watchAd(placement: AdPlacement, noAds: boolean): Promise<A
     await new Promise((r) => setTimeout(r, 700));
   }
   return { ok: false, reason: 'failed' };
+}
+
+const sessionStart = performance.now();
+let lastInterstitial: number | null = null;
+
+/**
+ * Yandex build: a fullscreen ad when the player leaves the result screen (see interstitial.ts for
+ * when). Resolves after the ad closes, so the next screen and its music start only then. The local
+ * preview has no SDK and shows the fake ad instead.
+ */
+export async function maybeInterstitial(profile: { tutorialDone: boolean; stats: { runs: number } }): Promise<void> {
+  if (!IS_YANDEX) return;
+  const now = performance.now();
+  if (!interstitialDue({ tutorialDone: profile.tutorialDone, runs: profile.stats.runs, now, sessionStart, lastShown: lastInterstitial })) return;
+  let shown: boolean;
+  if (ysdk()) shown = await showInterstitial();
+  else if (import.meta.env.DEV) {
+    await fakeAd();
+    shown = true;
+  } else return;
+  if (shown) lastInterstitial = performance.now();
 }

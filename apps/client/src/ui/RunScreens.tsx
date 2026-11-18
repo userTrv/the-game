@@ -10,7 +10,7 @@ import { api } from '../api';
 import { battleScene, hunt, showcase } from '../director';
 import { frame } from '../gfx/assets';
 import { name, num, stat, t } from '../i18n';
-import { adsAvailable, watchAd } from '../platform/ads';
+import { adsAvailable, maybeInterstitial, watchAd } from '../platform/ads';
 import { IS_YANDEX } from '../platform/yandex';
 import { battleHud, battleSpeed, buildOfRun } from '../scenes/battle';
 import { huntHud } from '../scenes/hunt';
@@ -858,6 +858,7 @@ export function ResultView(): JSX.Element | null {
   const p = player.value;
   const doubled = useSignal(false);
   const ref = useRef<HTMLDivElement>(null);
+  const leaving = useRef<string | null>(null);
   useEffect(() => {
     if (!e) return;
     sfx(e.result === 'defeat' ? 'defeat' : 'reward');
@@ -886,6 +887,15 @@ export function ResultView(): JSX.Element | null {
     const url = `${location.origin}/?startapp=ref_${p.id}`;
     const tgUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
     void import('../platform/share').then((m) => m.shareShell(text, url, tgUrl));
+  };
+  const goHome = async (): Promise<void> => {
+    // One tap per result: a second tap while the ad is open must not switch screens under it.
+    if (leaving.current === e.runId) return;
+    leaving.current = e.runId;
+    await maybeInterstitial(p.profile);
+    ended.value = null;
+    lastEvents.value = [];
+    screen.value = 'home';
   };
   const canDouble = e.result !== 'defeat' && !doubled.value && (p.adsToday.double_loot ?? 0) < 5 && (adsAvailable() || p.perks.noAds) && s.coral + s.shine > 0;
   return (
@@ -923,7 +933,7 @@ export function ResultView(): JSX.Element | null {
         {canDouble ? <Btn class="gold wide" id="double-btn" onClick={() => void double()}><Spr id="icon/ad" size={22} />{t('result.double')}</Btn> : null}
         <div class="row">
           {!IS_YANDEX ? <Btn class="ghost" id="share-btn" onClick={share}>{t('result.share')}</Btn> : null}
-          <Btn class="go grow" id="home-btn" onClick={() => { ended.value = null; lastEvents.value = []; screen.value = 'home'; }}>{t('result.home')} ▸</Btn>
+          <Btn class="go grow" id="home-btn" onClick={() => void goHome()}>{t('result.home')} ▸</Btn>
         </div>
       </div>
     </div>
