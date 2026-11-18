@@ -10,8 +10,6 @@
 | --- | --- | --- |
 | `POST /internal/bot/start` | `{ tgUser: { id, first_name, last_name?, username?, language_code? }, startParam?: string }` | `{ ok: true, isNew: boolean, lang: 'ru' \| 'en' }` |
 | `POST /internal/bot/notify-settings` | `{ tgId: number, set?: { enabled?: boolean, corf?: boolean, events?: boolean, kraken?: boolean } }` | `{ ok: true, settings: { enabled, corf, events, kraken }, lang }` |
-| `POST /internal/payments/pre-checkout` | `{ tgId, payload, currency, totalAmount }` | `{ ok: boolean, error?: string }` — отвечать быстрее 3 с |
-| `POST /internal/payments/successful` | `{ tgId, payload, currency, totalAmount, telegramPaymentChargeId, providerPaymentChargeId? }` | `{ ok: true, duplicate: boolean, productTitle?: string }` |
 | `POST /internal/outbox/claim` | `{ limit: number }` | `{ messages: OutboxMessage[] }` |
 | `POST /internal/outbox/report` | `{ results: { id: string, status: 'sent' \| 'blocked' \| 'retry' \| 'failed', retryAfter?: number, error?: string }[] }` | `{ ok: true }` |
 
@@ -28,13 +26,7 @@ interface OutboxMessage {
 `retry` возвращает сообщение в очередь с задержкой `retryAfter` секунд; `blocked` помечает игрока как
 заблокировавшего бота, и ему больше ничего не шлют.
 
-## Бот принимает от сервера (`BOT_INTERNAL_URL`)
+## Бот принимает от сервера
 
-| Метод и путь | Тело | Ответ |
-| --- | --- | --- |
-| `POST /internal/invoice-link` | `{ title, description, payload, amount }` (`amount` в Stars) | `{ url: string }` |
-| `POST /internal/refund` | `{ tgId, telegramPaymentChargeId }` | `{ ok: boolean, error?: string }` |
-| `GET /health` | — | `{ ok: true }` |
-
-Инвойс создаётся методом Bot API `createInvoiceLink` с `currency: "XTR"`, пустым `provider_token` и одной
-позицией в `prices`. `payload` — непрозрачная строка сервера (id заказа), не длиннее 128 байт.
+Сервер боту ничего не шлёт: платежей Stars больше нет. У бота остаются `GET /health` и, в режиме `webhook`,
+`POST /telegram/webhook`.
