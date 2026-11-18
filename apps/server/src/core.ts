@@ -10,17 +10,10 @@ import { adIntents, analytics, inbox, players, referrals, type CosmeticsState, t
 
 export type PlayerRow = typeof players.$inferSelect;
 
-/** Talks to the bot process (the only component allowed to reach api.telegram.org). */
-export interface BotClient {
-  invoiceLink(input: { title: string; description: string; payload: string; amount: number }): Promise<string>;
-  refund(tgId: number, chargeId: string): Promise<{ ok: boolean; error?: string }>;
-}
-
 export interface Ctx {
   db: Db;
   config: Config;
   now(): number;
-  bot: BotClient | null;
 }
 
 export class ApiFail extends Error {
@@ -123,6 +116,12 @@ export function refreshPlayer(row: PlayerRow, now: number): boolean {
   const season = seasonKey(now);
   if (row.pass.season !== season) {
     row.pass = { season, xp: 0, premium: false, claimedFree: [], claimedPremium: [] };
+    // Ad views towards the premium pass belong to the season that ended.
+    if (row.cosmetics.adViews?.season_pass) {
+      const views = { ...row.cosmetics.adViews };
+      delete views.season_pass;
+      row.cosmetics = { ...row.cosmetics, adViews: views };
+    }
     changed = true;
   }
   return changed;
@@ -156,6 +155,7 @@ export async function playerView(tx: Tx | Db, row: PlayerRow, now: number): Prom
     league: leagueOf(row.profile.trophies),
     inboxUnread: unread?.n ?? 0,
     adsToday,
+    adUnlocks: { ...(row.cosmetics.adViews ?? {}) },
     serverTime: now,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyQuestDeltas, applyRunAction, applyRunEnd, buyTalent, claimMilestone, collectCorf, corfState, leagueOf, MetaError, newProfile,
-  questDeltasForRun, refreshQuests, runConfigFor, startRun, upgradeBlocker, upgradeBuilding, weekKey, dayKey, PRODUCTS, COSMETIC_BY_ID,
+  questDeltasForRun, refreshQuests, runConfigFor, startRun, upgradeBlocker, upgradeBuilding, weekKey, dayKey, AD_UNLOCKS, COSMETIC_BY_ID, botGhosts, BOT_STAGES, eventGoals, DEFAULT_EVENTS,
 } from '../src';
 
 describe('meta progression', () => {
@@ -95,9 +95,26 @@ describe('meta progression', () => {
   it('leagues and shop catalogue are consistent', () => {
     expect(leagueOf(0)).toBe('bronze');
     expect(leagueOf(950)).toBe('platinum');
-    for (const p of PRODUCTS) {
-      expect(p.stars).toBeGreaterThan(0);
-      if (p.grant.type === 'cosmetic') expect(COSMETIC_BY_ID.has(p.grant.id)).toBe(true);
+    for (const u of AD_UNLOCKS) {
+      expect(u.views).toBeGreaterThan(0);
+      if (u.grant.type === 'cosmetic') expect(COSMETIC_BY_ID.get(u.grant.id)?.source).toBe('ads');
     }
+    // Every cosmetic marked as an ad unlock can actually be unlocked.
+    for (const c of COSMETIC_BY_ID.values()) if (c.source === 'ads') expect(AD_UNLOCKS.some((u) => u.grant.type === 'cosmetic' && u.grant.id === c.id)).toBe(true);
+  });
+
+  it('bot rivals are the same on every device and grow with the stage', () => {
+    const a = botGhosts(BOT_STAGES.from);
+    expect(botGhosts(BOT_STAGES.from)).toEqual(a);
+    expect(a).toHaveLength(BOT_STAGES.perStage);
+    const avg = (s: number): number => botGhosts(s).reduce((x, g) => x + g.power, 0) / BOT_STAGES.perStage;
+    expect(avg(BOT_STAGES.to)).toBeGreaterThan(avg(BOT_STAGES.from));
+  });
+
+  it('offline event goals follow the rank tiers, best first', () => {
+    const ev = { ...DEFAULT_EVENTS[0]!, startsAt: 0, endsAt: 1 };
+    const goals = eventGoals(ev, 3000);
+    expect(goals.map((g) => g.reached)).toEqual([false, true, true, true]);
+    expect(goals[0]?.cosmetic).toBe(ev.rankRewards[0]?.cosmetic);
   });
 });

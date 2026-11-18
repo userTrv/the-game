@@ -19,4 +19,5 @@ export * from './run';
 export * from './data/town';
 export * from './meta';
 export * from './liveops';
+export * from './bots';
 export * from './api';

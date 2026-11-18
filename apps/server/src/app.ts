@@ -3,8 +3,8 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import {
-  AdIntentBody, AnalyticsBody, applyQuestDeltas, AuthGuestBody, AuthTelegramBody, AuthWidgetBody, buyTalent, claimMilestone,
-  collectCorf, CORF_BOOST_MULT, CorfBody, COSMETIC_BY_ID, DoubleLootBody, GardenBody, HeroBody, IdBody, InvoiceBody, KrakenClaimBody, MetaError,
+  AdIntentBody, AdUnlockBody, AnalyticsBody, applyQuestDeltas, AuthGuestBody, AuthTelegramBody, AuthWidgetBody, buyTalent, claimMilestone,
+  collectCorf, CORF_BOOST_MULT, CorfBody, COSMETIC_BY_ID, DoubleLootBody, GardenBody, HeroBody, IdBody, KrakenClaimBody, MetaError,
   NotifyBody, PASS_LEVELS, PASS_REWARDS, PASS_XP_PER_LEVEL, PassClaimBody, QUEST_BY_ID, RunActionBody, RunIdBody, selectHero,
   SettingsBody, setGardenOff, StartRunBody, UpgradeBody, upgradeBuilding,
   type AuthResponse, type InboxItem, type MeResponse,
@@ -13,28 +13,26 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { registerAdmin } from './admin';
-import { consumeAd, createIntent, dailyChest, intentView, rewardCallback } from './ads';
+import { adUnlock, consumeAd, createIntent, dailyChest, intentView, rewardCallback } from './ads';
 import { AuthError, randomId, safeEqual, sha256, signInitData, signSession, verifyInitData, verifySession, verifyWidget, type TgUser } from './auth';
 import type { Config } from './config';
 import {
   ApiFail, applyReferral, createPlayer, grant, lockPlayer, ownedCosmetics, playerView, refreshPlayer, savePlayer, track, withPlayer,
-  type BotClient, type Ctx, type PlayerRow,
+  type Ctx, type PlayerRow,
 } from './core';
 import type { Db, Tx } from './db';
 import { inbox, players, runs } from './db/schema';
 import { krakenAttack, krakenClaim, liveopsView } from './liveops';
 import { claimOutbox, reportOutbox } from './outbox';
 import { abandonRun, activePublicRun, doubleLoot, runAction, startNewRun } from './runs';
-import { createInvoice, orderView, preCheckout, shopView, successfulPayment } from './shop';
 
 export interface AppDeps {
   db: Db;
   config: Config;
   now?: () => number;
-  bot?: BotClient | null;
 }
 
-const ANALYTICS_TYPES = new Set(['session_start', 'session_end', 'tutorial_step', 'screen', 'share', 'ad_view', 'purchase_open', 'client_error', 'fps_report']);
+const ANALYTICS_TYPES = new Set(['session_start', 'session_end', 'tutorial_step', 'screen', 'share', 'ad_view', 'shop_open', 'client_error', 'fps_report']);
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -45,7 +43,7 @@ declare module 'fastify' {
 export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { offset: number } } {
   const clock = { offset: 0 };
   const baseNow = deps.now ?? Date.now;
-  const ctx: Ctx = { db: deps.db, config: deps.config, now: () => baseNow() + clock.offset, bot: deps.bot ?? null };
+  const ctx: Ctx = { db: deps.db, config: deps.config, now: () => baseNow() + clock.offset };
   const cfg = deps.config;
 
   const app = Fastify({
@@ -355,19 +353,14 @@ export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { 
     });
   });
 
-  // --- Shop (Telegram Stars) -------------------------------------------------------------------
-  r.get('/api/shop', async (req) => {
-    const [row] = await ctx.db.select().from(players).where(eq(players.id, me(req)));
-    if (!row) throw new ApiFail('unauthorized', 401);
-    return shopView(ctx, row);
-  });
-  r.post('/api/shop/invoice', async (req) => createInvoice(ctx, me(req), InvoiceBody.parse(req.body).productId));
-  r.get('/api/shop/order/:id', async (req) => orderView(ctx, me(req), z.object({ id: z.string().max(64) }).parse(req.params).id));
-
   // --- Rewarded ads ----------------------------------------------------------------------------
   r.post('/api/ads/intent', async (req) => createIntent(ctx, me(req), AdIntentBody.parse(req.body).placement));
   r.get('/api/ads/intent/:id', async (req) => intentView(ctx, me(req), z.object({ id: z.string().max(64) }).parse(req.params).id));
   r.post('/api/ads/chest', async (req) => dailyChest(ctx, me(req), IdBody.parse(req.body).id));
+  r.post('/api/ads/unlock', async (req) => {
+    const body = AdUnlockBody.parse(req.body);
+    return adUnlock(ctx, me(req), body.id, body.adIntentId);
+  });
   // Reward URL for the ad network: GET /api/ads/reward?secret=...&userid=[userId]
   r.get('/api/ads/reward', async (req) => {
     const q = z.object({ secret: z.string().max(200), userid: z.string().max(64) }).parse(req.query);
@@ -414,12 +407,6 @@ export function buildApp(deps: AppDeps): FastifyInstance & { ctx: Ctx; clock: { 
         const { enabled, corf, events, kraken } = row.notify;
         return { ok: true, settings: { enabled, corf, events, kraken }, lang: row.lang };
       });
-    });
-    const Pay = z.object({ tgId: z.number().int(), payload: z.string().max(128), currency: z.string().max(8), totalAmount: z.number().int() });
-    internal.post('/payments/pre-checkout', async (req) => preCheckout(ctx, Pay.parse(req.body)));
-    internal.post('/payments/successful', async (req) => {
-      const body = Pay.extend({ telegramPaymentChargeId: z.string().min(1).max(256), providerPaymentChargeId: z.string().optional() }).parse(req.body);
-      return successfulPayment(ctx, { payload: body.payload, currency: body.currency, totalAmount: body.totalAmount, chargeId: body.telegramPaymentChargeId });
     });
     internal.post('/outbox/claim', async (req) => ({ messages: await claimOutbox(ctx, z.object({ limit: z.number().int().min(1).max(100) }).parse(req.body).limit) }));
     internal.post('/outbox/report', async (req) => {

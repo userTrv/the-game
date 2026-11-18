@@ -7,7 +7,6 @@ import { ApiFail, grant, playerView, withPlayer, type Ctx } from './core';
 import { analytics, broadcasts, liveEvents, payments, players, runs, type SeasonConfig } from './db/schema';
 import { upsertLive } from './liveops';
 import { broadcastReport, createBroadcast, segmentSize } from './outbox';
-import { refundPayment } from './shop';
 
 const DAY = 86_400_000;
 const dayOf = (ms: number) => Math.floor(ms / DAY);
@@ -184,9 +183,5 @@ export function registerAdmin(app: FastifyInstance, ctx: Ctx): void {
     });
 
     admin.get('/payments', async () => ({ payments: await ctx.db.select().from(payments).where(inArray(payments.status, ['paid', 'refunded'])).orderBy(desc(payments.createdAt)).limit(100) }));
-    admin.post('/payments/:id/refund', async (req) => {
-      const { id } = z.object({ id: z.string().max(64) }).parse(req.params);
-      return refundPayment(ctx, id);
-    });
   }, { prefix: '/admin/api' });
 }

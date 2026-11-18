@@ -1,33 +1,19 @@
-import type { InboxItem, LiveopsView, MeResponse, PlayerView, RunActionResponse, ShopView } from '@shellter/shared';
+import type { InboxItem, LiveopsView, MeResponse, PlayerView, RunActionResponse } from '@shellter/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { BotClient } from '../src/core';
-import { liveEvents, outbox, payments, players } from '../src/db/schema';
+import { liveEvents, outbox, players } from '../src/db/schema';
 import { runJobs } from '../src/jobs';
 import { finalizeEnded, upsertLive } from '../src/liveops';
 import { seedDev } from '../src/seed';
 import { harness, startRun, type Harness } from './helpers';
 
 let h: Harness;
-const invoices: { payload: string; amount: number }[] = [];
-const refunds: string[] = [];
-const bot: BotClient = {
-  async invoiceLink(input) {
-    invoices.push({ payload: input.payload, amount: input.amount });
-    return `https://t.me/$invoice-${input.payload}`;
-  },
-  async refund(_tg, chargeId) {
-    if (refunds.includes(chargeId)) return { ok: false, error: 'CHARGE_ALREADY_REFUNDED' };
-    refunds.push(chargeId);
-    return { ok: true };
-  },
-};
 const SECRET = { 'x-internal-secret': 'test-internal' };
 type P = { player: PlayerView };
 type Err = { error: { code: string } };
 
 beforeAll(async () => {
-  h = await harness({ devAuth: true }, bot);
+  h = await harness({ devAuth: true });
   await seedDev(h.app.ctx);
 });
 afterAll(() => h.close());
@@ -141,58 +127,37 @@ describe('live-ops', () => {
   });
 });
 
-describe('payments (Telegram Stars)', () => {
-  it('invoice -> pre-checkout -> successful payment once -> refund rolls back', async () => {
-    const a = await h.telegram(7001);
-    const shop = (await h.call<ShopView>('GET', '/api/shop', undefined, a.token)).body;
-    expect(shop.enabled).toBe(true);
-    expect(shop.products.find((p) => p.id === 'crab_azure')?.available).toBe(true);
-    const inv = await h.call<{ orderId: string; url: string }>('POST', '/api/shop/invoice', { productId: 'crab_azure' }, a.token);
-    expect(inv.body.url).toContain(inv.body.orderId);
-    expect(invoices.at(-1)).toEqual({ payload: inv.body.orderId, amount: 75 });
-
-    const pay = { tgId: 7001, payload: inv.body.orderId, currency: 'XTR', totalAmount: 75 };
-    expect((await h.call('POST', '/internal/payments/pre-checkout', pay)).status).toBe(401);
-    expect((await h.call<{ ok: boolean }>('POST', '/internal/payments/pre-checkout', { ...pay, totalAmount: 1 }, undefined, SECRET)).body.ok).toBe(false);
-    expect((await h.call<{ ok: boolean }>('POST', '/internal/payments/pre-checkout', { ...pay, payload: 'nope' }, undefined, SECRET)).body.ok).toBe(false);
-    expect((await h.call<{ ok: boolean }>('POST', '/internal/payments/pre-checkout', pay, undefined, SECRET)).body.ok).toBe(true);
-    // Not delivered before successful_payment.
-    expect((await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player.cosmetics.owned).not.toContain('crab_azure');
-
-    const done = { ...pay, telegramPaymentChargeId: 'charge-1' };
-    const first = await h.call<{ duplicate: boolean; productTitle: string }>('POST', '/internal/payments/successful', done, undefined, SECRET);
-    expect(first.body.duplicate).toBe(false);
-    expect(first.body.productTitle).toContain('Лазурь');
-    const again = await h.call<{ duplicate: boolean }>('POST', '/internal/payments/successful', done, undefined, SECRET);
-    expect(again.body.duplicate).toBe(true);
-    let me = (await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player;
-    expect(me.cosmetics.owned).toContain('crab_azure');
-    expect((await h.call<{ status: string }>('GET', `/api/shop/order/${inv.body.orderId}`, undefined, a.token)).body.status).toBe('paid');
+describe('cosmetics for rewarded ads', () => {
+  it('each verified ad counts once; the last one unlocks; owned items refuse more views', async () => {
+    const a = await h.guest();
+    const watch = async (): Promise<string> => {
+      // The ad network rewards the newest pending intent; the test clock must move between them.
+      h.time.now += 1000;
+      const intent = await h.call<{ id: string }>('POST', '/api/ads/intent', { placement: 'unlock' }, a.token);
+      await h.call('POST', '/api/dev/ad-watch', {}, a.token);
+      return intent.body.id;
+    };
+    // An intent without a watched ad is not accepted.
+    const raw = await h.call<{ id: string }>('POST', '/api/ads/intent', { placement: 'unlock' }, a.token);
+    expect((await h.call<Err>('POST', '/api/ads/unlock', { id: 'crab_azure', adIntentId: raw.body.id }, a.token)).body.error.code).toBe('ad_not_verified');
+    let res: P & { unlocked: boolean } = { player: a.player, unlocked: false };
+    for (let i = 0; i < 5; i++) {
+      const id = await watch();
+      res = (await h.call<P & { unlocked: boolean }>('POST', '/api/ads/unlock', { id: 'crab_azure', adIntentId: id }, a.token)).body;
+      expect(res.unlocked).toBe(i === 4);
+      if (i < 4) expect(res.player.adUnlocks.crab_azure).toBe(i + 1);
+      // The same intent cannot be spent twice.
+      expect((await h.call<Err>('POST', '/api/ads/unlock', { id: 'crab_azure', adIntentId: id }, a.token)).status).toBe(400);
+    }
+    expect(res.player.cosmetics.owned).toContain('crab_azure');
+    expect(res.player.adUnlocks.crab_azure).toBeUndefined();
     expect((await h.call('POST', '/api/cosmetics/equip', { id: 'crab_azure' }, a.token)).status).toBe(200);
-    expect((await h.call<Err>('POST', '/api/shop/invoice', { productId: 'crab_azure' }, a.token)).body.error.code).toBe('product_owned');
-    expect((await h.call<{ ok: boolean }>('POST', '/internal/payments/pre-checkout', pay, undefined, SECRET)).body.ok).toBe(false);
-
-    // Resource pack: daily limit and refund rollback.
-    const pack = await h.call<{ orderId: string }>('POST', '/api/shop/invoice', { productId: 'pack_coral_s' }, a.token);
-    await h.call('POST', '/internal/payments/successful', { tgId: 7001, payload: pack.body.orderId, currency: 'XTR', totalAmount: 50, telegramPaymentChargeId: 'charge-2' }, undefined, SECRET);
-    me = (await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player;
-    expect(me.profile.coral).toBe(500);
-    expect((await h.call<Err>('POST', '/api/shop/invoice', { productId: 'pack_coral_s' }, a.token)).body.error.code).toBe('product_daily_limit');
-
-    const login = await h.call<{ token: string }>('POST', '/admin/api/login', { password: h.config.adminPassword });
-    const admin = login.body.token;
-    expect((await h.call('POST', '/admin/api/login', { password: 'bad' })).status).toBe(403);
-    expect((await h.call('POST', `/admin/api/payments/${pack.body.orderId}/refund`, {}, a.token)).status).toBe(403);
-    expect((await h.call<{ ok: boolean }>('POST', `/admin/api/payments/${pack.body.orderId}/refund`, {}, admin)).body.ok).toBe(true);
-    expect((await h.call('POST', `/admin/api/payments/${pack.body.orderId}/refund`, {}, admin)).status).toBe(400);
-    await h.call('POST', `/admin/api/payments/${inv.body.orderId}/refund`, {}, admin);
-    me = (await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player;
-    expect(me.profile.coral).toBe(0);
-    expect(me.cosmetics.owned).not.toContain('crab_azure');
-    expect(me.cosmetics.equipped.crab).toBe('crab_default');
-    expect(refunds).toEqual(['charge-2', 'charge-1']);
-    const rows = await h.handle.db.select().from(payments).where(eq(payments.playerId, a.player.id));
-    expect(rows.filter((r) => r.status === 'refunded')).toHaveLength(2);
+    expect((await h.call<Err>('POST', '/api/ads/unlock', { id: 'crab_azure', adIntentId: await watch() }, a.token)).body.error.code).toBe('unlock_owned');
+    expect((await h.call<Err>('POST', '/api/ads/unlock', { id: 'no_such', adIntentId: 'x' }, a.token)).body.error.code).toBe('unlock_unknown');
+    // Unlock views do not eat into the daily ad rewards.
+    const me = (await h.call<MeResponse>('GET', '/api/me', undefined, a.token)).body.player;
+    expect(me.adsToday.unlock).toBe(6);
+    expect((await h.call('POST', '/api/ads/intent', { placement: 'daily_chest' }, a.token)).status).toBe(200);
   });
 });
 
@@ -206,6 +171,7 @@ describe('bot integration, broadcasts and admin', () => {
     expect(set.body.settings.corf).toBe(false);
 
     const admin = (await h.call<{ token: string }>('POST', '/admin/api/login', { password: h.config.adminPassword })).body.token;
+    expect((await h.call('POST', '/admin/api/login', { password: 'bad' })).status).toBe(403);
     await h.handle.db.delete(outbox);
     const bc = { segment: { kind: 'all' }, text: { ru: 'Привет, риф!', en: 'Hello, reef!' }, button: { text: 'Play', kind: 'webapp', url: 'https://game.test' } };
     const preview = await h.call<{ recipients: number }>('POST', '/admin/api/broadcasts/preview', bc, admin);

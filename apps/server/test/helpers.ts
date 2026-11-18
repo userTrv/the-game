@@ -3,7 +3,6 @@ import type { z } from 'zod';
 import { buildApp } from '../src/app';
 import { signInitData } from '../src/auth';
 import { testConfig, type Config } from '../src/config';
-import type { BotClient } from '../src/core';
 import { connect, type DbHandle } from '../src/db';
 
 export interface Harness {
@@ -17,11 +16,11 @@ export interface Harness {
   telegram(id: number, startParam?: string, name?: string): Promise<AuthResponse>;
 }
 
-export async function harness(over: Partial<Config> = {}, bot: BotClient | null = null): Promise<Harness> {
+export async function harness(over: Partial<Config> = {}): Promise<Harness> {
   const config = testConfig(over);
   const handle = await connect(process.env.TEST_DATABASE_URL ?? 'pglite://memory');
   const time = { now: Date.UTC(2026, 10, 11, 12) };
-  const app = buildApp({ db: handle.db, config, now: () => time.now, bot });
+  const app = buildApp({ db: handle.db, config, now: () => time.now });
   await app.ready();
   const call: Harness['call'] = async (method, url, body, token, headers = {}) => {
     const h: Record<string, string> = { ...headers };

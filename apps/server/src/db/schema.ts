@@ -9,6 +9,8 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 export interface CosmeticsState {
   owned: string[];
   equipped: Record<CosmeticKind, string>;
+  /** Ad unlock id -> rewarded ads watched towards it. */
+  adViews?: Record<string, number>;
 }
 export interface PassState {
   season: string;

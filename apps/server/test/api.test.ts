@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { signInitData, signWidget } from '../src/auth';
 import { analytics, ghosts, players } from '../src/db/schema';
-import { botBuild } from '../src/seed';
+import { botBuild } from '@shellter/shared';
 import { buildFighter, ratePower } from '@shellter/shared';
 import { harness, REPORT, startRun, type Harness } from './helpers';
 

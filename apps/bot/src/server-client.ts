@@ -44,29 +44,6 @@ export interface NotifySettingsResponse {
   lang?: 'ru' | 'en';
 }
 
-export interface PreCheckoutRequest {
-  tgId: number;
-  payload: string;
-  currency: string;
-  totalAmount: number;
-}
-
-export interface PreCheckoutResponse {
-  ok: boolean;
-  error?: string;
-}
-
-export interface SuccessfulPaymentRequest extends PreCheckoutRequest {
-  telegramPaymentChargeId: string;
-  providerPaymentChargeId?: string;
-}
-
-export interface SuccessfulPaymentResponse {
-  ok: true;
-  duplicate: boolean;
-  productTitle?: string;
-}
-
 export interface OutboxMessage {
   id: string;
   chatId: number;
@@ -87,9 +64,6 @@ export interface OutboxResult {
 export interface ServerClient {
   botStart(request: BotStartRequest): Promise<BotStartResponse>;
   notifySettings(request: NotifySettingsRequest): Promise<NotifySettingsResponse>;
-  /** Must settle within ~3 s: Telegram waits at most 10 s for the pre-checkout answer. */
-  preCheckout(request: PreCheckoutRequest): Promise<PreCheckoutResponse>;
-  successfulPayment(request: SuccessfulPaymentRequest): Promise<SuccessfulPaymentResponse>;
   claimOutbox(request: { limit: number }): Promise<{ messages: OutboxMessage[] }>;
   reportOutbox(request: { results: OutboxResult[] }): Promise<{ ok: true }>;
 }
@@ -134,12 +108,6 @@ const schemas = {
     settings: z.object({ enabled: z.boolean(), corf: z.boolean(), events: z.boolean(), kraken: z.boolean() }),
     lang,
   }),
-  preCheckout: z.object({ ok: z.boolean(), error: z.string().optional() }),
-  successfulPayment: z.object({
-    ok: z.literal(true),
-    duplicate: z.boolean(),
-    productTitle: z.string().optional(),
-  }),
   claimOutbox: z.object({
     messages: z.array(
       z.object({
@@ -168,8 +136,6 @@ export interface HttpServerClientOptions {
   fetch?: typeof fetch;
   /** Per-attempt timeout for ordinary calls. Default 5000 ms. */
   timeoutMs?: number;
-  /** Total budget of the pre-checkout call including retries. Default 3000 ms. */
-  preCheckoutBudgetMs?: number;
   /** Delay before the first retry; doubles on every further retry. Default 250 ms. */
   retryBaseDelayMs?: number;
 }
@@ -246,21 +212,10 @@ export function createHttpServerClient(options: HttpServerClientOptions): Server
     throw lastError ?? new ServerClientError('timeout', `${path}: time budget exhausted`);
   }
 
-  const preCheckoutBudgetMs = options.preCheckoutBudgetMs ?? 3000;
-
   return {
     botStart: (body) => request('/internal/bot/start', body, schemas.botStart, { attempts: 2, timeoutMs }),
     notifySettings: (body) =>
       request('/internal/bot/notify-settings', body, schemas.notifySettings, { attempts: 2, timeoutMs }),
-    preCheckout: (body) =>
-      request('/internal/payments/pre-checkout', body, schemas.preCheckout, {
-        attempts: 3,
-        timeoutMs: preCheckoutBudgetMs,
-        budgetMs: preCheckoutBudgetMs,
-      }),
-    // The server is idempotent by telegramPaymentChargeId, so retrying is always safe.
-    successfulPayment: (body) =>
-      request('/internal/payments/successful', body, schemas.successfulPayment, { attempts: 3, timeoutMs: 10_000 }),
     // The worker loop is the retry mechanism for claims.
     claimOutbox: (body) => request('/internal/outbox/claim', body, schemas.claimOutbox, { attempts: 1, timeoutMs }),
     reportOutbox: (body) => request('/internal/outbox/report', body, schemas.reportOutbox, { attempts: 3, timeoutMs }),

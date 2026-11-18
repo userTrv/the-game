@@ -12,11 +12,7 @@ import type {
   NotifySettingsResponse,
   OutboxMessage,
   OutboxResult,
-  PreCheckoutRequest,
-  PreCheckoutResponse,
   ServerClient,
-  SuccessfulPaymentRequest,
-  SuccessfulPaymentResponse,
 } from '../src/server-client';
 
 export const TOKEN = '123456:TEST-bot-token';
@@ -45,8 +41,6 @@ export class FakeServer implements ServerClient {
   calls = {
     botStart: [] as BotStartRequest[],
     notifySettings: [] as NotifySettingsRequest[],
-    preCheckout: [] as PreCheckoutRequest[],
-    successfulPayment: [] as SuccessfulPaymentRequest[],
     claimOutbox: [] as { limit: number }[],
     reportOutbox: [] as { results: OutboxResult[] }[],
   };
@@ -54,24 +48,12 @@ export class FakeServer implements ServerClient {
   lang: 'ru' | 'en' | undefined = undefined;
   settings: NotifySettings = { enabled: true, corf: true, events: true, kraken: false };
   queue: OutboxMessage[] = [];
-  private seenCharges = new Set<string>();
 
   onBotStart: (request: BotStartRequest) => Promise<BotStartResponse> = async () => ({
     ok: true,
     isNew: true,
     lang: this.lang,
   });
-
-  onPreCheckout: (request: PreCheckoutRequest) => Promise<PreCheckoutResponse> = async () => ({ ok: true });
-
-  /** Idempotent by charge id, like the real server. */
-  onSuccessfulPayment: (request: SuccessfulPaymentRequest) => Promise<SuccessfulPaymentResponse> = async (
-    request,
-  ) => {
-    const duplicate = this.seenCharges.has(request.telegramPaymentChargeId);
-    this.seenCharges.add(request.telegramPaymentChargeId);
-    return { ok: true, duplicate, productTitle: 'Pearl pack' };
-  };
 
   async botStart(request: BotStartRequest): Promise<BotStartResponse> {
     this.calls.botStart.push(request);
@@ -82,16 +64,6 @@ export class FakeServer implements ServerClient {
     this.calls.notifySettings.push(request);
     this.settings = { ...this.settings, ...request.set };
     return { ok: true, settings: { ...this.settings }, lang: this.lang };
-  }
-
-  async preCheckout(request: PreCheckoutRequest): Promise<PreCheckoutResponse> {
-    this.calls.preCheckout.push(request);
-    return this.onPreCheckout(request);
-  }
-
-  async successfulPayment(request: SuccessfulPaymentRequest): Promise<SuccessfulPaymentResponse> {
-    this.calls.successfulPayment.push(request);
-    return this.onSuccessfulPayment(request);
   }
 
   async claimOutbox(request: { limit: number }): Promise<{ messages: OutboxMessage[] }> {
@@ -140,7 +112,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const shellter = createBot(config, {
     server,
     logger: silentLogger,
-    paymentRetry: { inlineAttempts: 2, baseDelayMs: 10, maxDelayMs: 20 },
     ...options.deps,
   });
   await shellter.bot.init();
@@ -166,7 +137,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     async stop() {
       await shellter.bot.stop();
       await polling;
-      await shellter.payments.stop();
       await mock.close();
     },
   };

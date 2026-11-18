@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     secret: config.internalSecret,
     logger: logger.child({ scope: 'server-client' }),
   });
-  const { bot, payments, setupProfile } = createBot(config, { server, logger: logger.child({ scope: 'bot' }) });
+  const { bot, setupProfile } = createBot(config, { server, logger: logger.child({ scope: 'bot' }) });
   const http = createInternalServer(config, { bot, logger: logger.child({ scope: 'http' }) });
   const outbox = createOutboxWorker({
     api: bot.api,
@@ -56,7 +56,6 @@ async function main(): Promise<void> {
       // Stop claiming and flush reports first, then stop taking updates, then drop the HTTP server.
       await outbox.stop();
       await bot.stop();
-      await payments.stop();
       await http.close();
     } catch (error) {
       logger.error('shutdown failed', describeError(error));
